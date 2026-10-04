@@ -9,6 +9,7 @@ import AppShell from './components/AppShell.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Settings from './pages/Settings.jsx'
 import ComingSoon from './pages/ComingSoon.jsx'
+import Icon from './components/Icon.jsx'
 import './App.css'
 
 function App() {
@@ -70,7 +71,13 @@ function App() {
   if (!user) {
     return (
       <main className="page">
-        <h1>Chào mừng đến với VietLearn!</h1>
+        <div className="login-hero">
+          <span className="logo-mark logo-mark-lg">
+            <Icon name="cap" size={30} />
+          </span>
+          <h1>Chào mừng đến với VietLearn!</h1>
+          <p className="hint">Học nhanh hơn, ôn đúng chỗ yếu.</p>
+        </div>
         <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
       </main>
     )
@@ -106,10 +113,10 @@ function App() {
         />
       )}
       {route === 'documents' && (
-        <ComingSoon icon="📄" title="Tài liệu" text="Tải PDF, DOCX, TXT lên để tạo câu hỏi tự động. Có ở bản cập nhật sau." />
+        <ComingSoon icon="file" title="Tài liệu" text="Tải PDF, DOCX, TXT lên để tạo câu hỏi tự động. Có ở bản cập nhật sau." />
       )}
       {route === 'quiz' && (
-        <ComingSoon icon="🎯" title="Quiz & phòng" text="Tạo quiz, mở phòng và làm bài cùng lúc trên điện thoại. Có ở bản cập nhật sau." />
+        <ComingSoon icon="target" title="Quiz & phòng" text="Tạo quiz, mở phòng và làm bài cùng lúc trên điện thoại. Có ở bản cập nhật sau." />
       )}
       {route === 'settings' &&
         (profile ? (

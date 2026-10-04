@@ -1,16 +1,23 @@
-// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (tên thương hiệu), nội dung, thanh điều hướng dưới cho điện thoại.
+// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (logo + tên thương hiệu), nội dung, thanh điều hướng dưới cho điện thoại.
+import Icon from './Icon.jsx'
+
 const NAV_ITEMS = [
-  { id: 'home', label: 'Trang chủ', icon: '🏠' },
-  { id: 'documents', label: 'Tài liệu', icon: '📄' },
-  { id: 'quiz', label: 'Quiz', icon: '🎯' },
-  { id: 'settings', label: 'Cài đặt', icon: '⚙️' },
+  { id: 'home', label: 'Trang chủ', icon: 'home' },
+  { id: 'documents', label: 'Tài liệu', icon: 'file' },
+  { id: 'quiz', label: 'Quiz', icon: 'target' },
+  { id: 'settings', label: 'Cài đặt', icon: 'settings' },
 ]
 
 export default function AppShell({ route, planLabel, children }) {
   return (
     <div className="shell">
       <header className="shell-header">
-        <span className="brand">VietLearn</span>
+        <div className="brand-wrap">
+          <span className="logo-mark">
+            <Icon name="cap" size={18} />
+          </span>
+          <span className="brand">VietLearn</span>
+        </div>
         {planLabel && <span className="badge">{planLabel}</span>}
       </header>
 
@@ -25,8 +32,8 @@ export default function AppShell({ route, planLabel, children }) {
               href={`#/${item.id}`}
               aria-current={route === item.id ? 'page' : undefined}
             >
-              <span className="nav-icon" aria-hidden="true">
-                {item.icon}
+              <span className="nav-icon">
+                <Icon name={item.icon} size={22} />
               </span>
               {item.label}
             </a>

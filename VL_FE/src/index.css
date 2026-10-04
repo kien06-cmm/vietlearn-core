@@ -1,27 +1,41 @@
 /* Design tokens VietLearn: gradient xanh - tím, hỗ trợ chế độ tối và 3 cỡ chữ (data-theme, data-font trên <html>) */
 :root {
   color-scheme: light;
-  --blue: #5b8cff;
-  --purple: #b265f5;
+  --blue: #4c7df4;
+  --purple: #9b51e0;
+  --grad: linear-gradient(135deg, #4c7df4, #9b51e0);
   --ink: #1f2540;
-  --muted: #6b7394;
+  --muted: #5f6788;
   --line: #e3e7f5;
-  --bg: #f6f7fc;
+  --bg: #f4f6fd;
   --surface: #ffffff;
-  --surface-2: #eef0fa;
+  --surface-2: #eceffa;
+  --tint: #eaf0ff; /* nền nhạt cho ô icon */
   --danger: #d6364f;
+  --warn-bg: #fff6e5;
+  --warn-line: #f2d49b;
+  --ok: #1f9d6b;
+  --radius: 16px;
+  --radius-sm: 12px;
+  --shadow: 0 1px 2px rgba(31, 37, 64, 0.05), 0 6px 18px rgba(31, 37, 64, 0.06);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
   --blue: #7aa2ff;
-  --ink: #e8ebfa;
-  --muted: #9aa3c7;
+  --purple: #c08bff;
+  --ink: #eceffc;
+  --muted: #a3acd0;
   --line: #2b3254;
-  --bg: #12152a;
-  --surface: #1b1f3a;
+  --bg: #0f1226;
+  --surface: #1a1e3a;
   --surface-2: #262c4f;
+  --tint: #252d57;
   --danger: #ff7a8e;
+  --warn-bg: #2e2a1f;
+  --warn-line: #5a4a22;
+  --ok: #4fd1a1;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.25);
 }
 
 /* Cỡ chữ: mọi kích thước trong CSS dùng rem nên đổi ở đây là cả giao diện đổi theo */
@@ -44,6 +58,8 @@ html[data-font='lg'] {
 body {
   margin: 0;
   font-family: 'Be Vietnam Pro', system-ui, sans-serif;
+  line-height: 1.5;
   color: var(--ink);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
