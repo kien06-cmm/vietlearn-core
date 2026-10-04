@@ -1,21 +1,35 @@
+// Chức năng: form đăng nhập, tạo tài khoản và quên mật khẩu.
 import { useState } from 'react'
 
-// Form đăng nhập / tạo tài khoản bằng email và mật khẩu.
-export default function LoginForm({ onLogin, onRegister }) {
+export default function LoginForm({ onLogin, onRegister, onReset }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
   const isLogin = mode === 'login'
+  const isReset = mode === 'reset'
+
+  function switchMode(next) {
+    setMode(next)
+    setError('')
+    setNotice('')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setNotice('')
     setBusy(true)
     try {
-      await (isLogin ? onLogin : onRegister)(email, password)
+      if (isReset) {
+        await onReset(email)
+        setNotice('Nếu email này đã đăng ký, bạn sẽ nhận được thư đặt lại mật khẩu.')
+      } else {
+        await (isLogin ? onLogin : onRegister)(email, password)
+      }
     } catch (err) {
       setError(translateError(err.code))
     } finally {
@@ -23,9 +37,12 @@ export default function LoginForm({ onLogin, onRegister }) {
     }
   }
 
+  const title = isReset ? 'Quên mật khẩu' : isLogin ? 'Đăng nhập' : 'Tạo tài khoản'
+  const submitText = isReset ? 'Gửi thư đặt lại mật khẩu' : title
+
   return (
     <form className="card" onSubmit={handleSubmit}>
-      <h2>{isLogin ? 'Đăng nhập' : 'Tạo tài khoản'}</h2>
+      <h2>{title}</h2>
 
       <label>
         Email
@@ -38,28 +55,37 @@ export default function LoginForm({ onLogin, onRegister }) {
         />
       </label>
 
-      <label>
-        Mật khẩu
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={6}
-          autoComplete={isLogin ? 'current-password' : 'new-password'}
-        />
-      </label>
+      {!isReset && (
+        <label>
+          Mật khẩu
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={6}
+            autoComplete={isLogin ? 'current-password' : 'new-password'}
+          />
+        </label>
+      )}
 
       {error && <p className="msg msg-error" role="alert">{error}</p>}
+      {notice && <p className="hint" role="status">{notice}</p>}
 
       <button className="btn btn-primary" type="submit" disabled={busy}>
-        {busy ? 'Đang xử lý...' : isLogin ? 'Đăng nhập' : 'Tạo tài khoản'}
+        {busy ? 'Đang xử lý...' : submitText}
       </button>
+
+      {isLogin && (
+        <button type="button" className="btn-link" onClick={() => switchMode('reset')}>
+          Quên mật khẩu?
+        </button>
+      )}
 
       <button
         type="button"
         className="btn-link"
-        onClick={() => setMode(isLogin ? 'register' : 'login')}
+        onClick={() => switchMode(isLogin ? 'register' : 'login')}
       >
         {isLogin ? 'Chưa có tài khoản? Tạo tài khoản' : 'Đã có tài khoản? Đăng nhập'}
       </button>
@@ -67,7 +93,7 @@ export default function LoginForm({ onLogin, onRegister }) {
   )
 }
 
-// Đổi mã lỗi của Firebase thành câu tiếng Việt dễ hiểu.
+// Đổi mã lỗi Firebase thành câu tiếng Việt.
 function translateError(code) {
   const messages = {
     'auth/invalid-credential': 'Email hoặc mật khẩu không đúng.',
@@ -75,6 +101,7 @@ function translateError(code) {
     'auth/weak-password': 'Mật khẩu cần ít nhất 6 ký tự.',
     'auth/invalid-email': 'Email không hợp lệ.',
     'auth/too-many-requests': 'Thử lại quá nhiều lần. Vui lòng đợi một lúc.',
+    'auth/network-request-failed': 'Lỗi mạng. Kiểm tra kết nối rồi thử lại.',
     'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'apiKey Firebase chưa đúng. Kiểm tra lại file .env.local.',
     'auth/invalid-api-key': 'apiKey Firebase chưa đúng. Kiểm tra lại file .env.local.',
   }
