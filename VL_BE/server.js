@@ -1,9 +1,11 @@
 import express from 'express';
+import cors from 'cors';
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware để parse dữ liệu dạng JSON
+// Cấp phép cho Frontend gọi API không bị chặn
+app.use(cors());
 app.use(express.json());
 
 // API thử nghiệm (Health Check)
