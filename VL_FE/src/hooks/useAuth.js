@@ -43,6 +43,10 @@ export function useAuth() {
     return auth.currentUser.emailVerified
   }, [])
 
+  // Phải bọc useCallback: nếu tạo hàm mới mỗi lần render thì useEffect trong App.jsx (phụ thuộc getToken)
+  // sẽ chạy lại liên tục và gọi /me vô hạn.
+  const getToken = useCallback(() => auth.currentUser.getIdToken(), [])
+
   return {
     user,
     emailVerified,
@@ -53,6 +57,6 @@ export function useAuth() {
     resetPassword: (email) => sendPasswordResetEmail(auth, email),
     resendVerification: () => sendEmailVerification(auth.currentUser),
     refreshUser,
-    getToken: () => auth.currentUser.getIdToken(),
+    getToken,
   }
 }
