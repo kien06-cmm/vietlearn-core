@@ -1,5 +1,7 @@
 // Chức năng: ghi log có cấu trúc (mỗi request một dòng JSON) để dễ lọc/tìm lỗi trên Render.
 
+import { getClientIp } from './rateLimit.js';
+
 export function requestLogger(req, res, next) {
     const start = Date.now();
 
@@ -11,7 +13,8 @@ export function requestLogger(req, res, next) {
             path: req.path,
             status: res.statusCode,
             ms: Date.now() - start,
-            uid: req.user?.uid || null
+            uid: req.user?.uid || null,
+            ip: getClientIp(req)
         };
         console.log(JSON.stringify(entry));
     });

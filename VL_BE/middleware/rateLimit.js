@@ -1,6 +1,12 @@
 // Chức năng: giới hạn số request theo IP (chống spam/brute-force), lưu trong bộ nhớ của 1 server.
 // Lưu ý: nếu sau này chạy nhiều instance trên Render thì cần chuyển sang Redis.
 
+// Lấy IP thật của người dùng. Trên Render, req.ip thường là IP của proxy (mọi người dùng chung 1 IP),
+// nên ưu tiên header do Cloudflare (phía trước Render) đặt, rồi mới dùng req.ip.
+export function getClientIp(req) {
+    return req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || req.ip;
+}
+
 /**
  * Tạo middleware giới hạn request.
  * @param {object} opts
@@ -22,7 +28,7 @@ export function rateLimit({ windowMs, max, name = 'default' }) {
 
     return function rateLimitMiddleware(req, res, next) {
         const now = Date.now();
-        const key = `${name}:${req.ip}`;
+        const key = `${name}:${getClientIp(req)}`;
         let entry = hits.get(key);
 
         if (!entry || entry.resetAt <= now) {
