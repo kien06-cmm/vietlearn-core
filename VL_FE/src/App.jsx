@@ -1,7 +1,7 @@
 // Chức năng: màn hình chính - hiện trạng thái backend, form đăng nhập, hồ sơ và nhắc xác minh email.
 import { useEffect, useState } from 'react'
 import { useAuth } from './hooks/useAuth.js'
-import { getHealth, getMe } from './services/api.js'
+import { getHealth, getMe, trackEvent } from './services/api.js'
 import LoginForm from './components/LoginForm.jsx'
 import './App.css'
 
@@ -23,6 +23,13 @@ function App() {
   const [profile, setProfile] = useState(null)
   const [profileError, setProfileError] = useState('')
   const [verifyMsg, setVerifyMsg] = useState('')
+
+  // Ghi 1 sự kiện 'visit' cho mỗi phiên trình duyệt (không đếm lại khi tải lại trang)
+  useEffect(() => {
+    if (sessionStorage.getItem('vl_visit_tracked')) return
+    sessionStorage.setItem('vl_visit_tracked', '1')
+    trackEvent('visit', { meta: { path: window.location.pathname } })
+  }, [])
 
   // Kiểm tra backend còn sống
   useEffect(() => {
@@ -53,6 +60,13 @@ function App() {
     }
   }, [user, emailVerified, getToken])
 
+  // Đăng ký xong thì ghi sự kiện 'register' (kèm token để gắn với uid)
+  async function handleRegister(email, password) {
+    const cred = await register(email, password)
+    const token = await cred.user.getIdToken()
+    trackEvent('register', { token })
+  }
+
   async function handleResend() {
     setVerifyMsg('')
     try {
@@ -77,7 +91,7 @@ function App() {
       {loading && <p className="hint">Đang kiểm tra đăng nhập...</p>}
 
       {!loading && !user && (
-        <LoginForm onLogin={login} onRegister={register} onReset={resetPassword} />
+        <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
       )}
 
       {!loading && user && (
