@@ -1,25 +1,40 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useAuth } from './hooks/useAuth.js'
+import { getHealth } from './services/api.js'
+import LoginForm from './components/LoginForm.jsx'
+import './App.css'
 
 function App() {
-  const [message, setMessage] = useState('Đang kết nối Backend...')
+  const { user, loading, login, register, logout } = useAuth()
+  const [backendStatus, setBackendStatus] = useState('Đang kết nối Backend...')
 
+  // Kiểm tra backend trên Render còn sống không
   useEffect(() => {
-    // Gọi API từ Render của bạn
-    fetch('https://vietlearn-core.onrender.com/health')
-      .then(res => res.json())
-      .then(data => {
-        setMessage(data.message)
-      })
-      .catch(err => {
-        setMessage('Lỗi kết nối Backend: ' + err.message)
-      })
+    getHealth()
+      .then((data) => setBackendStatus(data.message))
+      .catch((err) => setBackendStatus('Lỗi kết nối Backend: ' + err.message))
   }, [])
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '50px', fontFamily: 'sans-serif' }}>
+    <main className="page">
       <h1>Chào mừng đến với VietLearn!</h1>
-      <p style={{ color: 'blue', fontSize: '18px' }}>Trạng thái: {message}</p>
-    </div>
+      <p className="status">Trạng thái: {backendStatus}</p>
+
+      {loading && <p className="hint">Đang kiểm tra đăng nhập...</p>}
+
+      {!loading && !user && <LoginForm onLogin={login} onRegister={register} />}
+
+      {!loading && user && (
+        <section className="card">
+          <p>
+            Bạn đã đăng nhập với email <strong>{user.email}</strong>
+          </p>
+          <button className="btn btn-secondary" onClick={logout}>
+            Đăng xuất
+          </button>
+        </section>
+      )}
+    </main>
   )
 }
 
