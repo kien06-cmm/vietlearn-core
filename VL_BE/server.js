@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getDb } from './firebase.js';
+import { getDb, getProjectId } from './firebase.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -27,6 +27,7 @@ app.get('/health/db', async (req, res) => {
         res.status(200).json({
             status: 'success',
             message: 'Backend đọc/ghi được Firestore',
+            projectId: getProjectId(),
             data: snap.data()
         });
     } catch (err) {
