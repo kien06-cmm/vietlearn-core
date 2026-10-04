@@ -1,7 +1,7 @@
 // Chức năng: kiểm tra token Firebase. requireAuth chặn request chưa đăng nhập; optionalAuth cho phép khách.
 import { getAdminAuth } from '../firebase.js';
 
-function readToken(req) {
+export function readToken(req) {
     const header = req.headers.authorization || '';
     return header.startsWith('Bearer ') ? header.slice(7) : null;
 }

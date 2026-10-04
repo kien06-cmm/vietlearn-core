@@ -1,8 +1,14 @@
-// Chức năng: màn hình chính - hiện trạng thái backend, form đăng nhập, hồ sơ và nhắc xác minh email.
+// Chức năng: điểm vào ứng dụng - đăng nhập, rồi hiện khung ứng dụng (Dashboard, Tài liệu, Quiz, Cài đặt).
 import { useEffect, useState } from 'react'
 import { useAuth } from './hooks/useAuth.js'
-import { getHealth, getMe, trackEvent } from './services/api.js'
+import { useProfile } from './hooks/useProfile.js'
+import { useHashRoute } from './hooks/useHashRoute.js'
+import { trackEvent } from './services/api.js'
 import LoginForm from './components/LoginForm.jsx'
+import AppShell from './components/AppShell.jsx'
+import Dashboard from './pages/Dashboard.jsx'
+import Settings from './pages/Settings.jsx'
+import ComingSoon from './pages/ComingSoon.jsx'
 import './App.css'
 
 function App() {
@@ -17,11 +23,10 @@ function App() {
     resendVerification,
     refreshUser,
     getToken,
+    reauthenticate,
   } = useAuth()
-
-  const [backendStatus, setBackendStatus] = useState('Đang kết nối Backend...')
-  const [profile, setProfile] = useState(null)
-  const [profileError, setProfileError] = useState('')
+  const { profile, error: profileError, save } = useProfile(user, emailVerified, getToken)
+  const route = useHashRoute()
   const [verifyMsg, setVerifyMsg] = useState('')
 
   // Ghi 1 sự kiện 'visit' cho mỗi phiên trình duyệt (không đếm lại khi tải lại trang)
@@ -30,35 +35,6 @@ function App() {
     sessionStorage.setItem('vl_visit_tracked', '1')
     trackEvent('visit', { meta: { path: window.location.pathname } })
   }, [])
-
-  // Kiểm tra backend còn sống
-  useEffect(() => {
-    getHealth()
-      .then((data) => setBackendStatus(data.message))
-      .catch((err) => setBackendStatus('Lỗi kết nối Backend: ' + err.message))
-  }, [])
-
-  // Tải hồ sơ từ backend sau khi đăng nhập
-  useEffect(() => {
-    if (!user) {
-      setProfile(null)
-      setProfileError('')
-      return
-    }
-    let cancelled = false
-    setProfileError('')
-    getToken()
-      .then((token) => getMe(token))
-      .then((data) => {
-        if (!cancelled) setProfile(data.user)
-      })
-      .catch((err) => {
-        if (!cancelled) setProfileError(err.message)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [user, emailVerified, getToken])
 
   // Đăng ký xong thì ghi sự kiện 'register' (kèm token để gắn với uid)
   async function handleRegister(email, password) {
@@ -83,47 +59,72 @@ function App() {
     setVerifyMsg(ok ? 'Email đã được xác minh.' : 'Chưa thấy xác minh. Hãy bấm vào link trong email trước.')
   }
 
-  return (
-    <main className="page">
-      <h1>Chào mừng đến với VietLearn!</h1>
-      <p className="status">Trạng thái: {backendStatus}</p>
+  if (loading) {
+    return (
+      <main className="page">
+        <p className="hint">Đang kiểm tra đăng nhập...</p>
+      </main>
+    )
+  }
 
-      {loading && <p className="hint">Đang kiểm tra đăng nhập...</p>}
-
-      {!loading && !user && (
+  if (!user) {
+    return (
+      <main className="page">
+        <h1>Chào mừng đến với VietLearn!</h1>
         <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
-      )}
+      </main>
+    )
+  }
 
-      {!loading && user && (
+  // Không tải được hồ sơ (vd: tài khoản đã bị xóa): báo lỗi và cho đăng xuất
+  if (profileError && !profile) {
+    return (
+      <main className="page">
         <section className="card">
-          <p>
-            Xin chào <strong>{profile?.displayName || user.email}</strong>
+          <p className="msg msg-error" role="alert">
+            {profileError}
           </p>
-          <p className="hint">{user.email}</p>
-
-          {!profile && !profileError && <p className="hint">Đang tải hồ sơ...</p>}
-          {profileError && <p className="msg msg-error" role="alert">{profileError}</p>}
-          {profile && <p className="hint">Gói: {profile.plan}</p>}
-
-          {!emailVerified && (
-            <>
-              <p className="msg msg-error">Email chưa được xác minh. Hãy mở email và bấm vào link xác minh.</p>
-              <button className="btn btn-secondary" onClick={handleResend}>
-                Gửi lại email xác minh
-              </button>
-              <button className="btn btn-secondary" onClick={handleCheckVerified}>
-                Tôi đã xác minh
-              </button>
-              {verifyMsg && <p className="hint" role="status">{verifyMsg}</p>}
-            </>
-          )}
-
           <button className="btn btn-secondary" onClick={logout}>
             Đăng xuất
           </button>
         </section>
+      </main>
+    )
+  }
+
+  return (
+    <AppShell route={route} planLabel={profile?.plan}>
+      {route === 'home' && (
+        <Dashboard
+          user={user}
+          profile={profile}
+          profileError={profileError}
+          emailVerified={emailVerified}
+          onResend={handleResend}
+          onCheckVerified={handleCheckVerified}
+          verifyMsg={verifyMsg}
+        />
       )}
-    </main>
+      {route === 'documents' && (
+        <ComingSoon icon="📄" title="Tài liệu" text="Tải PDF, DOCX, TXT lên để tạo câu hỏi tự động. Có ở bản cập nhật sau." />
+      )}
+      {route === 'quiz' && (
+        <ComingSoon icon="🎯" title="Quiz & phòng" text="Tạo quiz, mở phòng và làm bài cùng lúc trên điện thoại. Có ở bản cập nhật sau." />
+      )}
+      {route === 'settings' &&
+        (profile ? (
+          <Settings
+            key={profile.uid}
+            profile={profile}
+            save={save}
+            getToken={getToken}
+            reauthenticate={reauthenticate}
+            logout={logout}
+          />
+        ) : (
+          <p className="hint">Đang tải hồ sơ...</p>
+        ))}
+    </AppShell>
   )
 }
 

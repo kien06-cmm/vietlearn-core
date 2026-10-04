@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -45,7 +47,18 @@ export function useAuth() {
 
   // Phải bọc useCallback: nếu tạo hàm mới mỗi lần render thì useEffect trong App.jsx (phụ thuộc getToken)
   // sẽ chạy lại liên tục và gọi /me vô hạn.
-  const getToken = useCallback(() => auth.currentUser.getIdToken(), [])
+  // force = true: lấy token mới từ Firebase (cần sau khi nhập lại mật khẩu để token mang thời điểm đăng nhập mới)
+  const getToken = useCallback((force = false) => auth.currentUser.getIdToken(force), [])
+
+  // Nhập lại mật khẩu để xác nhận thao tác nhạy cảm (xóa tài khoản)
+  const reauthenticate = useCallback(
+    (password) =>
+      reauthenticateWithCredential(
+        auth.currentUser,
+        EmailAuthProvider.credential(auth.currentUser.email, password),
+      ),
+    [],
+  )
 
   return {
     user,
@@ -58,5 +71,6 @@ export function useAuth() {
     resendVerification: () => sendEmailVerification(auth.currentUser),
     refreshUser,
     getToken,
+    reauthenticate,
   }
 }

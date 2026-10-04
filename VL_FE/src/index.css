@@ -1,12 +1,40 @@
-/* Nền chung cho toàn trang */
+/* Design tokens VietLearn: gradient xanh - tím, hỗ trợ chế độ tối và 3 cỡ chữ (data-theme, data-font trên <html>) */
 :root {
+  color-scheme: light;
   --blue: #5b8cff;
   --purple: #b265f5;
   --ink: #1f2540;
   --muted: #6b7394;
   --line: #e3e7f5;
   --bg: #f6f7fc;
+  --surface: #ffffff;
+  --surface-2: #eef0fa;
   --danger: #d6364f;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --blue: #7aa2ff;
+  --ink: #e8ebfa;
+  --muted: #9aa3c7;
+  --line: #2b3254;
+  --bg: #12152a;
+  --surface: #1b1f3a;
+  --surface-2: #262c4f;
+  --danger: #ff7a8e;
+}
+
+/* Cỡ chữ: mọi kích thước trong CSS dùng rem nên đổi ở đây là cả giao diện đổi theo */
+html {
+  font-size: 16px;
+}
+
+html[data-font='sm'] {
+  font-size: 14px;
+}
+
+html[data-font='lg'] {
+  font-size: 19px;
 }
 
 * {

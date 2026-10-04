@@ -12,7 +12,19 @@ async function request(path, { token, method = 'GET', body } = {}) {
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) throw new Error(`Backend trả về lỗi ${res.status}`)
+  if (!res.ok) {
+    // Lấy thông báo tiếng Việt từ backend nếu có, kèm mã trạng thái để giao diện xử lý riêng từng trường hợp
+    let data = null
+    try {
+      data = await res.json()
+    } catch {
+      // phản hồi không phải JSON
+    }
+    const err = new Error(data?.message || `Backend trả về lỗi ${res.status}`)
+    err.status = res.status
+    err.code = data?.code
+    throw err
+  }
   return res.json()
 }
 

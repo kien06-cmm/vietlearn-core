@@ -1,12 +1,17 @@
-// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), ghi sự kiện analytics /events.
+// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), phiên khách /guest-sessions, ghi sự kiện analytics /events.
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb, getProjectId } from './firebase.js';
 import { requireAuth, optionalAuth } from './middleware/auth.js';
+import { requireOwner, requireRole } from './middleware/permissions.js';
+import { createGuestSession } from './guestSessions.js';
+import { initMonitoring, captureError } from './monitoring.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
+
+await initMonitoring();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -149,6 +154,16 @@ app.patch('/me', requireAuth, async (req, res) => {
 
 // Xóa tài khoản (xóa mềm): chỉ đánh dấu deletedAt, không xóa dữ liệu thật
 app.delete('/me', requireAuth, async (req, res) => {
+    // Thao tác nhạy cảm: bắt buộc vừa đăng nhập lại trong 10 phút (frontend yêu cầu nhập lại mật khẩu)
+    const authTime = req.user.auth_time;
+    if (!authTime || Date.now() / 1000 - authTime > 600) {
+        return res.status(401).json({
+            status: 'error',
+            code: 'recent-login-required',
+            message: 'Vui lòng nhập lại mật khẩu để xác nhận xóa tài khoản'
+        });
+    }
+
     const ref = getDb().collection('users').doc(req.user.uid);
     const snap = await ref.get();
 
@@ -161,6 +176,50 @@ app.delete('/me', requireAuth, async (req, res) => {
         updatedAt: FieldValue.serverTimestamp()
     });
     res.status(200).json({ status: 'success', message: 'Đã xóa tài khoản' });
+});
+
+// Xem hồ sơ của một người dùng: chỉ chính chủ hoặc admin (người A không đọc được dữ liệu người B)
+app.get(
+    '/users/:uid',
+    requireOwner((req) => req.params.uid),
+    async (req, res) => {
+        const snap = await getDb().collection('users').doc(req.params.uid).get();
+        if (!snap.exists || snap.data().deletedAt) {
+            return res.status(404).json({ status: 'error', message: 'Không tìm thấy người dùng' });
+        }
+        const { email, displayName, plan, isAdmin, settings } = snap.data();
+        res.status(200).json({
+            status: 'success',
+            user: { uid: req.params.uid, email, displayName, plan, isAdmin, settings: settings || {} }
+        });
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Phiên khách: guestSessions/{sha256(token)} - token tạm cho người vào phòng (không cần tài khoản)
+// ---------------------------------------------------------------------------
+const guestSchema = z.object({ displayName: z.string().trim().min(1).max(30) }).strict();
+
+// Chặt hơn giới hạn chung: 10 phiên khách / phút / IP để không bị tạo hàng loạt
+const guestLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'guest-sessions' });
+
+// Tạo phiên khách. Token chỉ trả về lần này; client gửi lại bằng header "Authorization: Guest <token>"
+app.post('/guest-sessions', guestLimiter, async (req, res) => {
+    const parsed = guestSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ status: 'error', message: 'Tên hiển thị không hợp lệ (1-30 ký tự)' });
+    }
+
+    const { token, guest } = await createGuestSession(parsed.data.displayName);
+    res.status(201).json({ status: 'success', token, guest });
+});
+
+// Khách xem lại phiên của mình (dùng để kiểm tra token còn hạn)
+app.get('/guest-sessions/me', requireRole(['guest']), (req, res) => {
+    res.status(200).json({
+        status: 'success',
+        guest: { id: req.actor.id, displayName: req.actor.displayName }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -210,6 +269,7 @@ app.use((err, req, res, next) => {
     if (err.type === 'entity.parse.failed' || err.type === 'entity.too.large') {
         return res.status(400).json({ status: 'error', message: 'Dữ liệu gửi lên không hợp lệ' });
     }
+    captureError(err, { path: req.path, uid: req.user?.uid || null });
     console.error(JSON.stringify({ time: new Date().toISOString(), level: 'error', message: err.message }));
     res.status(500).json({ status: 'error', message: 'Lỗi máy chủ' });
 });
