@@ -1,0 +1,81 @@
+# 05_DATA_MODEL — Mô hình dữ liệu Firestore (VietLearn V1)
+
+> Bản nháp theo 13_V1_ROADMAP. Phase 1 chi tiết; các phase sau chỉ phác thảo, chốt khi tới phase đó.
+
+## Nguyên tắc
+
+1. Firestore chặn mọi truy cập từ client. Chỉ backend (Admin SDK) đọc/ghi.
+2. **Đáp án đúng tách riêng** khỏi câu hỏi hiển thị cho người làm bài (collection `answerKeys`, chỉ backend đọc).
+3. Thiết kế theo truy vấn: lưu sẵn số liệu tổng hợp (denormalize) để giảm lượt đọc, vì Firestore tính phí theo lượt đọc/ghi.
+4. Mọi tài liệu có `createdAt`, `updatedAt` (timestamp do server đặt).
+5. Quiz đã publish là **bất biến**: sửa bài đã có người làm thì tạo version mới.
+6. Tên collection dùng tiếng Anh, camelCase cho field.
+
+## Phase 1 — Nền tảng
+
+### `users/{uid}`  (uid = Firebase Auth uid)
+| Field | Kiểu | Ghi chú |
+|---|---|---|
+| email | string | |
+| displayName | string | |
+| plan | string | `free` mặc định. Admin đổi tay ở V1 |
+| isAdmin | boolean | Cân nhắc dùng custom claim thay vì field |
+| settings | map | giao diện (dark mode, cỡ chữ) |
+| createdAt, updatedAt | timestamp | |
+| deletedAt | timestamp? | xóa mềm khi người dùng xóa tài khoản |
+
+### `guestSessions/{sessionId}`
+| Field | Kiểu | Ghi chú |
+|---|---|---|
+| displayName | string | tên hiển thị khi vào phòng |
+| roomId | string | |
+| expiresAt | timestamp | token tạm hết hạn |
+| claimedByUid | string? | khi khách tạo tài khoản để lưu kết quả |
+
+### `analyticsEvents/{eventId}`
+`type` (`visit`, `register`...), `uid?`, `at`, `meta`.
+
+## Phase 2 — Tài liệu (phác thảo)
+
+### `documents/{docId}`
+`ownerId`, `name`, `mimeType`, `sizeBytes`, `storagePath`, `status` (`uploading` | `processing` | `ready` | `failed`), `pageCount`, `folder`, `tags[]`, `pinned`, `createdAt`.
+
+### `documents/{docId}/chunks/{chunkId}`
+`pageNumber`, `index`, `text`.
+
+### `jobs/{jobId}`
+`type`, `ownerId`, `documentId?`, `status`, `attempts`, `progress` (ví dụ 35/50 trang), `error?`, `deadLetter` (boolean).
+
+## Phase 3 — AI và Question Bank (phác thảo)
+
+### `creditLedger/{entryId}`
+`uid`, `kind` (`estimated` | `reserved` | `actual` | `refund`), `amount`, `jobId`, `at`. Kiểm tra quota trước khi gọi AI; job lỗi phải hoàn credit.
+
+### `topics/{topicId}`
+`subject`, `chapter`, `name`. Hệ thống: Môn → Chương → Chủ đề.
+
+### `questions/{questionId}`
+`ownerId`, `topicId` (**bắt buộc**), `type` (4 lựa chọn | nhiều đáp án | đúng/sai | điền khuyết | trả lời ngắn), `stem`, `options[]`, `explanation?`, `source` = `{documentId, pageNumber, chunkId}`, `reviewStatus` (`draft` | `approved`), `createdAt`.
+
+### `answerKeys/{questionId}`
+`correct` (giá trị đáp án đúng). **Chỉ backend đọc.**
+
+## Phase 4 — Quiz, Phòng, Làm bài (phác thảo)
+
+- `quizzes/{quizId}` và `quizzes/{quizId}/versions/{versionId}` (bất biến sau publish; hỗ trợ fork).
+- `rooms/{roomId}`: `quizVersionId`, `hostId`, `code`, `status` (`WAITING` → `RUNNING` → `ENDED`), `maxParticipants`. Trạng thái do server quyết định.
+- `attempts/{attemptId}`: `roomId?`, `quizVersionId`, `participant` (uid hoặc guest), `seed` (random phía server), `answers`, `startedAt`, `submittedAt`, `score`, `events[]` (tab visibility, ...).
+
+## Phase 5 — Vòng lặp học tập (phác thảo)
+
+- `mistakes/{id}`: `uid`, `questionId`, `errorType` (gợi ý, không khẳng định), `confidence`, `chosenWrongOption`.
+- `reviewSchedule/{id}`: `uid`, `questionId`, `nextReviewAt` (lịch ôn 1 → 3 → 7 ngày, điều chỉnh theo đúng/sai và mức tự tin).
+- `topicMastery/{uid_topicId}`: số liệu tổng hợp sẵn theo chủ đề.
+- `roomStats/{roomId}`: số liệu heatmap, chỉ hiển thị khi đủ 5 lượt.
+
+## Quyết định cần chốt
+
+- [ ] Admin: dùng custom claim hay field `isAdmin`?
+- [ ] Biến `DATABASE_URL` trên Render có liên quan Postgres không? Nếu có thì quyết định có dùng Postgres cho thống kê (heatmap, topic mastery) hay không. Nên chốt trước Phase 4-5.
+- [ ] Chunk tài liệu: lưu trong subcollection hay collection riêng (ảnh hưởng chi phí đọc).
+- [ ] Danh sách chỉ mục (index) tổng hợp, bổ sung khi viết truy vấn thật.
