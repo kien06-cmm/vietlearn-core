@@ -36,7 +36,12 @@ async function extractPdf(buffer, { maxPages, onProgress }) {
         page.cleanup();
         await onProgress(i, total);
     }
-    await pdf.destroy();
+    // unpdf không chắc có destroy() (bản cũ/mới khác nhau): gọi nếu có, lỗi dọn dẹp không được làm hỏng kết quả đã trích
+    try {
+        if (typeof pdf.destroy === 'function') await pdf.destroy();
+    } catch {
+        // bỏ qua
+    }
 
     // Toàn bộ không có chữ => PDF scan (ảnh). OCR chưa hỗ trợ ở V1.
     const totalChars = pages.reduce((n, p) => n + p.text.length, 0);
