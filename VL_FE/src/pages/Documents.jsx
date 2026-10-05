@@ -5,6 +5,7 @@ import {
   createDocument,
   deleteDocument,
   getDocument,
+  getDocumentFileUrl,
   getQuota,
   listDocuments,
   updateDocument,
@@ -117,6 +118,20 @@ export default function Documents({ getToken }) {
   async function patchDoc(id, changes) {
     const res = await updateDocument(await getToken(), id, changes)
     setDocs((cur) => cur.map((d) => (d.id === id ? res.document : d)))
+  }
+
+  // Mở file gốc ở tab mới (PDF xem trực tiếp; DOCX/TXT thì trình duyệt tải về).
+  // Mở tab TRƯỚC khi gọi API để điện thoại không chặn popup.
+  async function openOriginal(id) {
+    const tab = window.open('about:blank', '_blank')
+    try {
+      const res = await getDocumentFileUrl(await getToken(), id)
+      if (tab) tab.location.href = res.url
+      else window.location.href = res.url
+    } catch (err) {
+      if (tab) tab.close()
+      throw err
+    }
   }
 
   async function removeDoc(id) {
@@ -234,7 +249,7 @@ export default function Documents({ getToken }) {
 
           {shown.length === 0 && <p className="hint">Không có tài liệu nào khớp bộ lọc.</p>}
           {shown.map((d) => (
-            <DocumentCard key={d.id} doc={d} onOpen={setViewing} onPatch={patchDoc} onDelete={removeDoc} />
+            <DocumentCard key={d.id} doc={d} onOpen={setViewing} onOriginal={openOriginal} onPatch={patchDoc} onDelete={removeDoc} />
           ))}
         </>
       )}

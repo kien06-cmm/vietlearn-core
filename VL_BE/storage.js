@@ -57,6 +57,13 @@ export async function downloadFile(path) {
     return Buffer.from(await res.arrayBuffer());
 }
 
+// Link tạm (5 phút) để người dùng xem/tải file gốc
+export async function createViewUrl(path) {
+    const { data, error } = await bucket().createSignedUrl(path, 300);
+    check(error);
+    return data.signedUrl;
+}
+
 // Xóa file (bỏ qua file không tồn tại)
 export async function removeFiles(paths) {
     const { error } = await bucket().remove(paths);

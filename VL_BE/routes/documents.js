@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
-import { createUploadUrl, getFileSize, readFileHead, removeFiles } from '../storage.js';
+import { createUploadUrl, createViewUrl, getFileSize, readFileHead, removeFiles } from '../storage.js';
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPlan } from '../config/plans.js';
@@ -251,6 +251,17 @@ router.post('/:id/complete', ownerOnly, async (req, res) => {
 router.get('/:id', ownerOnly, (req, res) => {
     if (!req.docSnap) return fail(res, 404, 'Không tìm thấy tài liệu');
     res.status(200).json({ status: 'success', document: toPublic(req.docSnap.id, req.docSnap.data()) });
+});
+
+// Link tạm để xem file gốc (PDF mở trực tiếp trên trình duyệt, có đủ ảnh/bảng)
+router.get('/:id/file', ownerOnly, async (req, res) => {
+    if (!req.docSnap) return fail(res, 404, 'Không tìm thấy tài liệu');
+
+    const d = req.docSnap.data();
+    if (d.status === 'uploading') return fail(res, 409, 'Tài liệu chưa tải xong', 'not-ready');
+
+    const url = await createViewUrl(d.storagePath);
+    res.status(200).json({ status: 'success', url, expiresInSeconds: 300 });
 });
 
 // Xem lại nội dung một trang đã trích (dùng cho màn hình xem từng trang)

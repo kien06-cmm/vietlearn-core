@@ -85,6 +85,11 @@ export function getDocumentPage(token, id, page) {
   return request(`/documents/${id}/pages/${page}`, { token })
 }
 
+// Link tạm để xem/tải file gốc: { url }
+export function getDocumentFileUrl(token, id) {
+  return request(`/documents/${id}/file`, { token })
+}
+
 // Tải file lên thẳng Storage bằng link PUT backend cấp (không qua backend). onProgress(percent) để hiện thanh tiến độ.
 export function uploadToSignedUrl(url, file, mimeType, onProgress) {
   return new Promise((resolve, reject) => {

@@ -28,7 +28,7 @@ function parseTags(text) {
   return [...new Set(text.split(',').map((t) => t.trim()).filter(Boolean))].slice(0, 10)
 }
 
-export default function DocumentCard({ doc, onOpen, onPatch, onDelete }) {
+export default function DocumentCard({ doc, onOpen, onOriginal, onPatch, onDelete }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(doc.name)
   const [folder, setFolder] = useState(doc.folder)
@@ -146,7 +146,12 @@ export default function DocumentCard({ doc, onOpen, onPatch, onDelete }) {
         <div className="doc-actions">
           {doc.status === 'ready' && (
             <button className="btn btn-primary" onClick={() => onOpen(doc)}>
-              Xem từng trang
+              Xem chữ từng trang
+            </button>
+          )}
+          {doc.status !== 'uploading' && (
+            <button className="btn btn-secondary" disabled={busy} onClick={() => run(() => onOriginal(doc.id))}>
+              {doc.ext === 'pdf' || doc.name.toLowerCase().endsWith('.pdf') ? 'Xem file gốc' : 'Tải file gốc'}
             </button>
           )}
           <button className="btn btn-secondary" onClick={() => setEditing(true)}>
