@@ -2,7 +2,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getDb, getBucket } from '../firebase.js';
+import { getDb } from '../firebase.js';
+import { createUploadUrl, getFileSize, readFileHead, removeFiles } from '../storage.js';
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPlan } from '../config/plans.js';
@@ -14,7 +15,7 @@ const TYPES = {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'text/plain': 'txt'
 };
-const UPLOAD_URL_TTL_MS = 15 * 60 * 1000;
+const UPLOAD_URL_TTL_SECONDS = 2 * 60 * 60;
 
 const col = () => getDb().collection('documents');
 
@@ -58,13 +59,7 @@ async function docOwner(req) {
 }
 const ownerOnly = requireOwner(docOwner);
 
-// Kiểm tra nội dung file
-async function readHead(file, length) {
-    const chunks = [];
-    for await (const chunk of file.createReadStream({ start: 0, end: length - 1 })) chunks.push(chunk);
-    return Buffer.concat(chunks);
-}
-
+// Kiểm tra nội dung file theo định dạng
 function looksValid(ext, head) {
     if (ext === 'pdf') return head.subarray(0, 5).toString('latin1') === '%PDF-';
     if (ext === 'docx') return head.length >= 4 && head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
@@ -156,7 +151,9 @@ router.post('/', createLimiter, userOnly, async (req, res) => {
     }
 
     const ref = col().doc();
-    const storagePath = `documents/${ownerId}/${ref.id}/original.${ext}`;
+    const storagePath = `${ownerId}/${ref.id}/original.${ext}`;
+    const url = await createUploadUrl(storagePath);
+
     await ref.set({
         ownerId,
         name,
@@ -174,13 +171,6 @@ router.post('/', createLimiter, userOnly, async (req, res) => {
         updatedAt: FieldValue.serverTimestamp()
     });
 
-    const [url] = await getBucket().file(storagePath).getSignedUrl({
-        version: 'v4',
-        action: 'write',
-        expires: Date.now() + UPLOAD_URL_TTL_MS,
-        contentType: mimeType
-    });
-
     const fresh = await ref.get();
     res.status(201).json({
         status: 'success',
@@ -189,7 +179,7 @@ router.post('/', createLimiter, userOnly, async (req, res) => {
             url,
             method: 'PUT',
             headers: { 'Content-Type': mimeType },
-            expiresInSeconds: UPLOAD_URL_TTL_MS / 1000
+            expiresInSeconds: UPLOAD_URL_TTL_SECONDS
         }
     });
 });
@@ -202,27 +192,20 @@ router.post('/:id/complete', ownerOnly, async (req, res) => {
     const d = req.docSnap.data();
     if (d.status !== 'uploading') return fail(res, 409, 'Tài liệu đã được xác nhận trước đó');
 
-    const file = getBucket().file(d.storagePath);
-    let meta;
-    try {
-        [meta] = await file.getMetadata();
-    } catch (err) {
-        if (err.code === 404) return fail(res, 400, 'Chưa thấy file đã tải lên', 'file-missing');
-        throw err;
-    }
+    const size = await getFileSize(d.storagePath);
+    if (size === null) return fail(res, 400, 'Chưa thấy file đã tải lên', 'file-missing');
 
     const reject = async (status, message, code) => {
-        await file.delete({ ignoreNotFound: true }).catch(() => {});
+        await removeFiles([d.storagePath]).catch(() => {});
         await ref.delete();
         return fail(res, status, message, code);
     };
 
-    const size = Number(meta.size);
     const plan = getPlan(req.profile.plan);
     if (size === 0) return reject(400, 'File rỗng', 'file-empty');
     if (size > plan.maxFileBytes) return reject(413, 'File quá lớn', 'file-too-large');
 
-    const head = await readHead(file, 4096);
+    const head = await readFileHead(d.storagePath, 4096);
     if (!looksValid(d.ext, head)) return reject(400, 'Nội dung file không đúng định dạng', 'file-invalid');
 
     const db = getDb();
@@ -280,10 +263,10 @@ router.delete('/:id', ownerOnly, async (req, res) => {
     if (!req.docSnap) return fail(res, 404, 'Không tìm thấy tài liệu');
 
     const ref = req.docSnap.ref;
-    const { ownerId } = req.docSnap.data();
+    const { storagePath } = req.docSnap.data();
     const db = getDb();
 
-    await getBucket().deleteFiles({ prefix: `documents/${ownerId}/${ref.id}/` });
+    await removeFiles([storagePath]);
     const jobs = await db.collection('jobs').where('documentId', '==', ref.id).get();
     await Promise.all(jobs.docs.map((j) => j.ref.delete()));
     await db.recursiveDelete(ref);

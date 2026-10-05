@@ -27,7 +27,7 @@ Vercel (VL_FE)  ──────────►  Render (VL_BE: API)  ──�
 | Realtime | Render (WebSocket) | Phòng làm bài. Không dùng Firestore listener cho phòng đông người |
 | Worker | Render Background Worker | Xử lý tài liệu, gọi AI, retry, dead-letter |
 | Dữ liệu | Firestore (`asia-southeast1`) | Dữ liệu ứng dụng |
-| Tệp | Firebase Storage | PDF, DOCX, TXT người dùng tải lên |
+| Tệp | Supabase Storage (gói free, không cần thẻ) | PDF, DOCX, TXT người dùng tải lên. Firebase Storage bắt buộc gói Blaze nên không dùng |
 
 ## 3. Môi trường
 

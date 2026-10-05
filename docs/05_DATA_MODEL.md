@@ -4,7 +4,7 @@
 
 ## Nguyên tắc
 
-1. Firestore chặn mọi truy cập từ client. Chỉ backend (Admin SDK) đọc/ghi.
+1. Firestore chặn mọi truy cập từ client. Chỉ backend (Admin SDK) đọc/ghi. File tài liệu nằm ở Supabase Storage (bucket riêng tư), cũng chỉ backend truy cập.
 2. **Đáp án đúng tách riêng** khỏi câu hỏi hiển thị cho người làm bài (collection `answerKeys`, chỉ backend đọc).
 3. Thiết kế theo truy vấn: lưu sẵn số liệu tổng hợp (denormalize) để giảm lượt đọc, vì Firestore tính phí theo lượt đọc/ghi.
 4. Mọi tài liệu có `createdAt`, `updatedAt` (timestamp do server đặt).
@@ -38,7 +38,7 @@
 ## Phase 2 — Tài liệu
 
 ### `documents/{docId}`
-`ownerId`, `name`, `mimeType`, `ext`, `sizeBytes`, `storagePath` (`documents/{ownerId}/{docId}/original.{ext}`), `status` (`uploading` → `queued` → `processing` → `ready` | `failed`), `pageCount?`, `folder`, `tags[]` (tối đa 10), `pinned`, `error?`, `createdAt`, `updatedAt`.
+`ownerId`, `name`, `mimeType`, `ext`, `sizeBytes`, `storagePath` (`{ownerId}/{docId}/original.{ext}` trong bucket Supabase `documents`), `status` (`uploading` → `queued` → `processing` → `ready` | `failed`), `pageCount?`, `folder`, `tags[]` (tối đa 10), `pinned`, `error?`, `createdAt`, `updatedAt`.
 
 ### `documents/{docId}/chunks/{chunkId}`
 `pageNumber`, `index`, `text`. Lưu subcollection vì Phase 3 luôn đọc chunk theo từng tài liệu.
