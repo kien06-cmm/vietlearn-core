@@ -58,13 +58,21 @@ Hàng đợi dựa trên Firestore (không dùng Redis ở V1).
 `uid`, `kind` (`estimated` | `reserved` | `actual` | `refund`), `amount`, `jobId`, `at`. Kiểm tra quota trước khi gọi AI; job lỗi phải hoàn credit.
 
 ### `topics/{topicId}`
-`subject`, `chapter`, `name`. Hệ thống: Môn → Chương → Chủ đề.
+`ownerId`, `subject`, `chapter`, `name`. Hệ thống: Môn → Chương → Chủ đề. API: `GET/POST /topics` (tạo trùng thì trả chủ đề cũ).
 
 ### `questions/{questionId}`
 `ownerId`, `topicId` (**bắt buộc**), `type` (4 lựa chọn | nhiều đáp án | đúng/sai | điền khuyết | trả lời ngắn), `stem`, `options[]`, `explanation?`, `source` = `{documentId, pageNumber, chunkId}`, `reviewStatus` (`draft` | `approved`), `createdAt`.
 
 ### `answerKeys/{questionId}`
-`correct` (giá trị đáp án đúng). **Chỉ backend đọc.**
+`correct` (giá trị đáp án đúng), `alternatives?` (điền khuyết). **Chỉ backend đọc.**
+
+### Job `generate_questions` (cùng collection `jobs`)
+`type`, `ownerId`, `documentId`, `topicId`, `count`, `types[]`, `pageFrom?`, `pageTo?`, `credits` = `{period, reserved}`, `result` = `{requested, generated, saved, rejected, inputTokens, outputTokens}`.
+Credits: `creditBalances/{uid}_{YYYY-MM}` (`used`, `reserved`) + sổ cái `creditLedger/{jobId}_{reserved|actual|refund}`. 1 credit = 1 câu hỏi.
+
+### API Phase 3
+`GET /questions/credits` · `POST /questions/generate` (202, giữ chỗ credits) · `GET /questions/jobs/:jobId` · `GET /questions?topicId&documentId&jobId&reviewStatus` · `GET/PATCH/DELETE /questions/:id` · `GET /questions/:id/source` (nút "Xem nguồn") · `POST /questions/:id/approve` · `POST /questions/approve-many`.
+Sửa tay một câu chạy lại đúng luật kiểm tra như câu AI sinh, rồi về `draft` để duyệt lại.
 
 ## Phase 4 — Quiz, Phòng, Làm bài (phác thảo)
 

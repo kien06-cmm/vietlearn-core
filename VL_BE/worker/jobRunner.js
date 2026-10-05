@@ -1,4 +1,4 @@
-// Chức năng: xử lý một job "extract_document": tải file -> trích văn bản -> chunk -> ghi Firestore; có tiến độ, retry (backoff), dead-letter.
+// Chức năng: chạy job từ hàng đợi theo job.type (hiện có "extract_document": tải file -> trích văn bản -> chunk -> ghi Firestore); có tiến độ, retry (backoff), dead-letter.
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
 import { downloadFile, removeFiles } from '../storage.js';
@@ -6,6 +6,9 @@ import { getPlan } from '../config/plans.js';
 import { captureError } from '../monitoring.js';
 import { extractPages, UserError } from './extract.js';
 import { buildChunks } from './text.js';
+import { AIError } from '../ai/provider.js';
+import { settleCredits } from '../credits.js';
+import { processGenerateQuestions } from './generateQuestions.js';
 
 const NOT_FOUND = 5; // mã lỗi gRPC khi document không còn tồn tại
 const PROGRESS_EVERY = 5; // ghi tiến độ mỗi 5 trang (tiết kiệm lượt ghi Firestore)
@@ -105,9 +108,9 @@ async function writeChunks(docRef, chunks) {
 // Lỗi tạm thời: retry có backoff; hết lượt thì dead-letter. Lỗi do người dùng (UserError): thất bại ngay.
 async function settleFailure(job, err) {
     const jobRef = jobsCol().doc(job.id);
-    const docRef = docsCol().doc(job.documentId);
     const attempts = job.attempts || 1;
     const maxAttempts = job.maxAttempts || 3;
+    const affectsDocument = job.type === 'extract_document' && !!job.documentId;
 
     let jobUpdate;
     let docUpdate;
@@ -115,6 +118,11 @@ async function settleFailure(job, err) {
     if (err instanceof UserError) {
         jobUpdate = { status: 'failed', error: err.message, deadLetter: false };
         docUpdate = { status: 'failed', error: err.message };
+    } else if (err instanceof AIError && !err.retryable) {
+        // Lỗi AI không thể thử lại (thiếu key, nội dung bị chặn, bị cắt...): thất bại ngay, chi tiết chỉ ghi log
+        log('error', 'AI lỗi không thể thử lại', { jobId: job.id, code: err.code, error: err.message });
+        jobUpdate = { status: 'failed', error: 'AI không xử lý được nội dung này', deadLetter: false };
+        docUpdate = { status: 'failed', error: 'AI không xử lý được nội dung này' };
     } else if (attempts >= maxAttempts) {
         jobUpdate = { status: 'failed', error: String(err.message).slice(0, 300), deadLetter: true };
         docUpdate = { status: 'failed', error: 'Xử lý thất bại, vui lòng thử lại sau' };
@@ -128,12 +136,30 @@ async function settleFailure(job, err) {
     }
 
     await jobRef.update({ ...jobUpdate, updatedAt: FieldValue.serverTimestamp() });
-    await docRef.update({ ...docUpdate, updatedAt: FieldValue.serverTimestamp() }).catch((e) => {
-        if (!isNotFound(e)) throw e;
-    });
+
+    // Job dùng AI credits mà thất bại hẳn (không còn retry) => hoàn toàn bộ credits đã giữ chỗ (idempotent)
+    if (jobUpdate.status === 'failed' && job.credits) {
+        await settleCredits({
+            uid: job.ownerId,
+            jobId: job.id,
+            period: job.credits.period,
+            reserved: job.credits.reserved,
+            actual: 0
+        });
+    }
+
+    if (!affectsDocument) return;
+
+    await docsCol()
+        .doc(job.documentId)
+        .update({ ...docUpdate, updatedAt: FieldValue.serverTimestamp() })
+        .catch((e) => {
+            if (!isNotFound(e)) throw e;
+        });
 }
 
-export async function processJob(job) {
+// Job: extract_document
+async function processExtractDocument(job) {
     const jobRef = jobsCol().doc(job.id);
     const docRef = docsCol().doc(job.documentId);
 
@@ -202,6 +228,36 @@ export async function processJob(job) {
             captureError(err, { jobId: job.id, documentId: job.documentId });
         }
         log('error', 'Job lỗi', { jobId: job.id, attempts: job.attempts, error: err.message });
+        await settleFailure(job, err);
+    }
+}
+
+// Bảng điều phối: thêm loại job mới (vd generate_questions) bằng cách thêm một dòng ở đây
+const HANDLERS = {
+    extract_document: processExtractDocument,
+    generate_questions: processGenerateQuestions
+};
+
+export async function processJob(job) {
+    const handler = HANDLERS[job.type];
+    if (!handler) {
+        log('error', 'Loại job không hỗ trợ', { jobId: job.id, type: job.type });
+        await jobsCol()
+            .doc(job.id)
+            .update({
+                status: 'failed',
+                error: `Loại job không hỗ trợ: ${job.type}`,
+                deadLetter: true,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        return;
+    }
+    try {
+        await handler(job);
+    } catch (err) {
+        // extract_document tự bắt lỗi bên trong; các loại job khác (vd generate_questions) ném lỗi lên đây
+        if (!(err instanceof UserError)) captureError(err, { jobId: job.id, type: job.type });
+        log('error', 'Job lỗi', { jobId: job.id, type: job.type, attempts: job.attempts, error: err.message });
         await settleFailure(job, err);
     }
 }

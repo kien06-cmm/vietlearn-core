@@ -11,6 +11,8 @@ import { initMonitoring, captureError } from './monitoring.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import documentsRouter from './routes/documents.js';
+import topicsRouter from './routes/topics.js';
+import questionsRouter from './routes/questions.js';
 import { startWorker } from './worker/index.js';
 
 await initMonitoring();
@@ -260,6 +262,12 @@ app.post('/events', eventsLimiter, optionalAuth, async (req, res) => {
 // Tài liệu (Phase 2)
 // ---------------------------------------------------------------------------
 app.use('/documents', documentsRouter);
+
+// ---------------------------------------------------------------------------
+// Question Bank + AI (Phase 3)
+// ---------------------------------------------------------------------------
+app.use('/topics', topicsRouter);
+app.use('/questions', questionsRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi
