@@ -35,16 +35,21 @@
 ### `analyticsEvents/{eventId}`
 `type` (`visit`, `register`...), `uid?`, `at`, `meta`.
 
-## Phase 2 — Tài liệu (phác thảo)
+## Phase 2 — Tài liệu
 
 ### `documents/{docId}`
-`ownerId`, `name`, `mimeType`, `sizeBytes`, `storagePath`, `status` (`uploading` | `processing` | `ready` | `failed`), `pageCount`, `folder`, `tags[]`, `pinned`, `createdAt`.
+`ownerId`, `name`, `mimeType`, `ext`, `sizeBytes`, `storagePath` (`documents/{ownerId}/{docId}/original.{ext}`), `status` (`uploading` → `queued` → `processing` → `ready` | `failed`), `pageCount?`, `folder`, `tags[]` (tối đa 10), `pinned`, `error?`, `createdAt`, `updatedAt`.
 
 ### `documents/{docId}/chunks/{chunkId}`
-`pageNumber`, `index`, `text`.
+`pageNumber`, `index`, `text`. Lưu subcollection vì Phase 3 luôn đọc chunk theo từng tài liệu.
 
 ### `jobs/{jobId}`
-`type`, `ownerId`, `documentId?`, `status`, `attempts`, `progress` (ví dụ 35/50 trang), `error?`, `deadLetter` (boolean).
+Hàng đợi dựa trên Firestore (không dùng Redis ở V1).
+`type` (`extract_document`), `ownerId`, `documentId`, `status` (`queued` → `running` → `done` | `failed`), `attempts`, `maxAttempts` (3), `progress` (`{ done, total }`, ví dụ 35/50 trang), `error?`, `deadLetter` (boolean), `runAfter` (phục vụ retry có backoff), `createdAt`, `updatedAt`.
+
+### Hạn mức và tìm kiếm
+- Hạn mức theo gói: `VL_BE/config/plans.js` (dung lượng file, số tài liệu, số trang).
+- Tìm kiếm V1 chỉ theo tên, tag, thư mục. Tìm trong nội dung chunk dời sau V1.
 
 ## Phase 3 — AI và Question Bank (phác thảo)
 
@@ -77,5 +82,7 @@
 
 - [ ] Admin: dùng custom claim hay field `isAdmin`?
 - [ ] Biến `DATABASE_URL` trên Render có liên quan Postgres không? Nếu có thì quyết định có dùng Postgres cho thống kê (heatmap, topic mastery) hay không. Nên chốt trước Phase 4-5.
-- [ ] Chunk tài liệu: lưu trong subcollection hay collection riêng (ảnh hưởng chi phí đọc).
+- [x] Chunk tài liệu: subcollection `documents/{docId}/chunks`.
+- [x] Hàng đợi: Firestore collection `jobs` (đổi sang Redis nếu tải lớn).
+- [ ] Dọn tài liệu kẹt ở `uploading` (người dùng không bấm xác nhận): làm ở Lát 2 hoặc cuối Phase 2.
 - [ ] Danh sách chỉ mục (index) tổng hợp, bổ sung khi viết truy vấn thật.

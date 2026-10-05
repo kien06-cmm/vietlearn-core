@@ -10,6 +10,7 @@ import { createGuestSession } from './guestSessions.js';
 import { initMonitoring, captureError } from './monitoring.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import documentsRouter from './routes/documents.js';
 
 await initMonitoring();
 
@@ -253,6 +254,11 @@ app.post('/events', eventsLimiter, optionalAuth, async (req, res) => {
 
     res.status(202).json({ status: 'success' });
 });
+
+// ---------------------------------------------------------------------------
+// Tài liệu (Phase 2)
+// ---------------------------------------------------------------------------
+app.use('/documents', documentsRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi

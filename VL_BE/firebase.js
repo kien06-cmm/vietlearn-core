@@ -1,7 +1,8 @@
-// Chức năng: kết nối Firebase Admin (Firestore + Auth), khóa lấy từ biến môi trường.
+// Chức năng: kết nối Firebase Admin (Firestore + Auth + Storage), khóa lấy từ biến môi trường.
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { getStorage } from 'firebase-admin/storage';
 
 let projectId = null;
 
@@ -29,7 +30,11 @@ function init() {
         serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
 
-    initializeApp({ credential: cert(serviceAccount) });
+    // Bucket mặc định theo project; đặt FIREBASE_STORAGE_BUCKET nếu tên khác
+    const storageBucket =
+        process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.firebasestorage.app`;
+
+    initializeApp({ credential: cert(serviceAccount), storageBucket });
     projectId = serviceAccount.project_id || null;
 }
 
@@ -41,4 +46,9 @@ export function getDb() {
 export function getAdminAuth() {
     init();
     return getAuth();
+}
+
+export function getBucket() {
+    init();
+    return getStorage().bucket();
 }
