@@ -8,6 +8,7 @@ import LoginForm from './components/LoginForm.jsx'
 import AppShell from './components/AppShell.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Settings from './pages/Settings.jsx'
+import Documents from './pages/Documents.jsx'
 import ComingSoon from './pages/ComingSoon.jsx'
 import Icon from './components/Icon.jsx'
 import './App.css'
@@ -112,9 +113,7 @@ function App() {
           verifyMsg={verifyMsg}
         />
       )}
-      {route === 'documents' && (
-        <ComingSoon icon="file" title="Tài liệu" text="Tải PDF, DOCX, TXT lên để tạo câu hỏi tự động. Có ở bản cập nhật sau." />
-      )}
+      {route === 'documents' && <Documents getToken={getToken} />}
       {route === 'quiz' && (
         <ComingSoon icon="target" title="Quiz & phòng" text="Tạo quiz, mở phòng và làm bài cùng lúc trên điện thoại. Có ở bản cập nhật sau." />
       )}

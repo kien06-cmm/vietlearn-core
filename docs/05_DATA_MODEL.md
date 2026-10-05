@@ -49,7 +49,8 @@ Hàng đợi dựa trên Firestore (không dùng Redis ở V1).
 
 ### Hạn mức và tìm kiếm
 - Hạn mức theo gói: `VL_BE/config/plans.js` (dung lượng file, số tài liệu, số trang).
-- Tìm kiếm V1 chỉ theo tên, tag, thư mục. Tìm trong nội dung chunk dời sau V1.
+- Tìm kiếm V1 chỉ theo tên, tag, thư mục (frontend lọc trên danh sách đã tải, tối đa 200 tài liệu). Tìm trong nội dung chunk dời sau V1.
+- Xem lại từng trang: `GET /documents/:id/pages/:page` (đọc chunk theo `pageNumber`, chỉ khi `status = ready`). TXT/DOCX là "trang ảo" (~3000 ký tự).
 
 ## Phase 3 — AI và Question Bank (phác thảo)
 
@@ -84,5 +85,5 @@ Hàng đợi dựa trên Firestore (không dùng Redis ở V1).
 - [ ] Biến `DATABASE_URL` trên Render có liên quan Postgres không? Nếu có thì quyết định có dùng Postgres cho thống kê (heatmap, topic mastery) hay không. Nên chốt trước Phase 4-5.
 - [x] Chunk tài liệu: subcollection `documents/{docId}/chunks`.
 - [x] Hàng đợi: Firestore collection `jobs` (đổi sang Redis nếu tải lớn).
-- [ ] Dọn tài liệu kẹt ở `uploading` (người dùng không bấm xác nhận): làm ở Lát 2 hoặc cuối Phase 2.
+- [x] Dọn tài liệu kẹt ở `uploading` (người dùng không bấm xác nhận): worker tự xóa file + bản ghi sau 24 giờ (`cleanupStaleUploads`, chạy mỗi 5 phút cùng `recoverStaleJobs`).
 - [ ] Danh sách chỉ mục (index) tổng hợp, bổ sung khi viết truy vấn thật.

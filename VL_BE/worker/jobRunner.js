@@ -1,7 +1,7 @@
 // Chức năng: xử lý một job "extract_document": tải file -> trích văn bản -> chunk -> ghi Firestore; có tiến độ, retry (backoff), dead-letter.
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
-import { downloadFile } from '../storage.js';
+import { downloadFile, removeFiles } from '../storage.js';
 import { getPlan } from '../config/plans.js';
 import { captureError } from '../monitoring.js';
 import { extractPages, UserError } from './extract.js';
@@ -13,6 +13,7 @@ const BATCH_SIZE = 400; // Firestore giới hạn 500 thao tác / batch
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_MAX_MS = 10 * 60_000;
 const STALE_MS = 10 * 60_000; // job "running" quá 10 phút không cập nhật => worker đã chết
+const STALE_UPLOAD_MS = 24 * 60 * 60_000; // tài liệu kẹt ở "uploading" quá 24 giờ => dọn
 
 const db = () => getDb();
 const jobsCol = () => db().collection('jobs');
@@ -58,6 +59,19 @@ export async function recoverStaleJobs() {
         if ((job.updatedAt?.toMillis?.() ?? 0) > cutoff) continue;
         log('warn', 'Khôi phục job bị bỏ dở', { jobId: d.id });
         await settleFailure({ id: d.id, ...job }, new Error('Worker dừng giữa chừng'));
+    }
+}
+
+// Người dùng tạo tài liệu nhưng không bao giờ bấm xác nhận (tắt trình duyệt, mất mạng) => xóa file lở và trả lại hạn mức
+export async function cleanupStaleUploads() {
+    const snap = await docsCol().where('status', '==', 'uploading').limit(50).get();
+    const cutoff = Date.now() - STALE_UPLOAD_MS;
+    for (const d of snap.docs) {
+        const data = d.data();
+        if ((data.createdAt?.toMillis?.() ?? Date.now()) > cutoff) continue;
+        await removeFiles([data.storagePath]).catch(() => {});
+        await d.ref.delete();
+        log('info', 'Dọn tài liệu kẹt ở bước tải lên', { documentId: d.id });
     }
 }
 

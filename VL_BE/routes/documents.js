@@ -253,6 +253,28 @@ router.get('/:id', ownerOnly, (req, res) => {
     res.status(200).json({ status: 'success', document: toPublic(req.docSnap.id, req.docSnap.data()) });
 });
 
+// Xem lại nội dung một trang đã trích (dùng cho màn hình xem từng trang)
+router.get('/:id/pages/:page', ownerOnly, async (req, res) => {
+    if (!req.docSnap) return fail(res, 404, 'Không tìm thấy tài liệu');
+
+    const d = req.docSnap.data();
+    if (d.status !== 'ready') return fail(res, 409, 'Tài liệu chưa sẵn sàng', 'not-ready');
+
+    const page = Number(req.params.page);
+    if (!Number.isInteger(page) || page < 1) return fail(res, 400, 'Số trang không hợp lệ');
+    if (d.pageCount && page > d.pageCount) return fail(res, 404, 'Không có trang này');
+
+    // Trang không có chữ (vd: ảnh) không có chunk => trả text rỗng
+    const snap = await req.docSnap.ref.collection('chunks').where('pageNumber', '==', page).get();
+    const text = snap.docs
+        .map((c) => c.data())
+        .sort((a, b) => a.index - b.index)
+        .map((c) => c.text)
+        .join('\n');
+
+    res.status(200).json({ status: 'success', page: { number: page, text }, pageCount: d.pageCount ?? null });
+});
+
 // Sửa tên / thư mục / tag / ghim
 router.patch('/:id', ownerOnly, async (req, res) => {
     if (!req.docSnap) return fail(res, 404, 'Không tìm thấy tài liệu');
