@@ -48,6 +48,15 @@ export async function readFileHead(path, length) {
     return buf.subarray(0, length);
 }
 
+// Tải toàn bộ file về bộ nhớ (worker dùng để trích văn bản)
+export async function downloadFile(path) {
+    const { data, error } = await bucket().createSignedUrl(path, 300);
+    check(error);
+    const res = await fetch(data.signedUrl);
+    if (!res.ok) throw new Error(`Không tải được file (${res.status})`);
+    return Buffer.from(await res.arrayBuffer());
+}
+
 // Xóa file (bỏ qua file không tồn tại)
 export async function removeFiles(paths) {
     const { error } = await bucket().remove(paths);

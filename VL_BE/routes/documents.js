@@ -7,6 +7,7 @@ import { createUploadUrl, getFileSize, readFileHead, removeFiles } from '../stor
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPlan } from '../config/plans.js';
+import { wakeWorker } from '../worker/index.js';
 
 const router = Router();
 
@@ -35,6 +36,7 @@ function toPublic(id, d) {
         sizeBytes: d.sizeBytes,
         status: d.status,
         pageCount: d.pageCount ?? null,
+        progress: d.progress || null,
         folder: d.folder || '',
         tags: d.tags || [],
         pinned: !!d.pinned,
@@ -208,30 +210,38 @@ router.post('/:id/complete', ownerOnly, async (req, res) => {
     const head = await readFileHead(d.storagePath, 4096);
     if (!looksValid(d.ext, head)) return reject(400, 'Nội dung file không đúng định dạng', 'file-invalid');
 
+    // Transaction: nếu 2 request /complete đến cùng lúc, chỉ một request tạo được job
     const db = getDb();
     const jobRef = db.collection('jobs').doc();
-    const batch = db.batch();
-    batch.update(ref, {
-        status: 'queued',
-        sizeBytes: size,
-        error: null,
-        updatedAt: FieldValue.serverTimestamp()
+    const claimed = await db.runTransaction(async (tx) => {
+        const cur = await tx.get(ref);
+        if (!cur.exists || cur.data().status !== 'uploading') return false;
+        tx.update(ref, {
+            status: 'queued',
+            sizeBytes: size,
+            progress: { done: 0, total: null },
+            error: null,
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        tx.set(jobRef, {
+            type: 'extract_document',
+            ownerId: d.ownerId,
+            documentId: ref.id,
+            status: 'queued',
+            attempts: 0,
+            maxAttempts: 3,
+            progress: { done: 0, total: null },
+            error: null,
+            deadLetter: false,
+            runAfter: FieldValue.serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        return true;
     });
-    batch.set(jobRef, {
-        type: 'extract_document',
-        ownerId: d.ownerId,
-        documentId: ref.id,
-        status: 'queued',
-        attempts: 0,
-        maxAttempts: 3,
-        progress: { done: 0, total: null },
-        error: null,
-        deadLetter: false,
-        runAfter: FieldValue.serverTimestamp(),
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-    });
-    await batch.commit();
+    if (!claimed) return fail(res, 409, 'Tài liệu đã được xác nhận trước đó');
+
+    wakeWorker(); // nếu worker chạy cùng tiến trình với API thì xử lý ngay
 
     const fresh = await ref.get();
     res.status(202).json({ status: 'success', document: toPublic(ref.id, fresh.data()), jobId: jobRef.id });

@@ -11,6 +11,7 @@ import { initMonitoring, captureError } from './monitoring.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import documentsRouter from './routes/documents.js';
+import { startWorker } from './worker/index.js';
 
 await initMonitoring();
 
@@ -282,4 +283,6 @@ app.use((err, req, res, next) => {
 
 app.listen(port, () => {
     console.log(`Backend Server đang chạy tại cổng ${port}`);
+    // Staging: worker chạy chung tiến trình với API. Khi tách Background Worker riêng, đặt RUN_WORKER=false
+    if (process.env.RUN_WORKER !== 'false') startWorker();
 });
