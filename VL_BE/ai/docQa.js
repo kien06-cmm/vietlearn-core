@@ -16,6 +16,25 @@ QUY TẮC BẮT BUỘC:
 - Chỉ trả về JSON đúng định dạng được yêu cầu, không thêm chữ nào khác.`;
 
 // ---------------------------------------------------------------------------
+// Chọn mẫu chunk để tóm tắt: tài liệu dài hơn giới hạn thì lấy các chunk rải đều từ đầu đến cuối (giữ nguyên thứ tự)
+// ---------------------------------------------------------------------------
+export function sampleChunks(chunks, maxChars = MAX_SUMMARY_CHARS) {
+    const total = chunks.reduce((s, c) => s + c.text.length, 0);
+    if (total <= maxChars) return chunks;
+
+    const want = Math.max(1, Math.floor((chunks.length * maxChars) / total));
+    const picked = [];
+    let size = 0;
+    for (let i = 0; i < want; i++) {
+        const c = chunks[Math.floor((i * chunks.length) / want)];
+        if (picked.length && size + c.text.length > maxChars) break;
+        picked.push(c);
+        size += c.text.length;
+    }
+    return picked;
+}
+
+// ---------------------------------------------------------------------------
 // Chọn đoạn liên quan đến câu hỏi
 // ---------------------------------------------------------------------------
 const STOPWORDS = new Set(

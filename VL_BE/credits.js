@@ -1,7 +1,14 @@
 // Chức năng: AI Credits (Phase 3) - giữ chỗ (reserved) trước khi gọi AI, chốt (actual) khi xong, hoàn (refund) phần không dùng.
 // Sổ cái: creditLedger/{jobId}_{kind} (id cố định => chạy lại không ghi trùng). Số dư theo tháng: creditBalances/{uid}_{YYYY-MM}.
 import { FieldValue } from 'firebase-admin/firestore';
-import { getDb } from './firebase.js';
+import { getDb as realGetDb } from './firebase.js';
+
+// Chỉ dùng trong test: thay Firestore thật bằng bản giả trong bộ nhớ
+let dbOverride = null;
+export function _useDbForTests(db) {
+    dbOverride = db;
+}
+const getDb = () => dbOverride || realGetDb();
 
 // Không đủ credits trong tháng
 export class QuotaError extends Error {

@@ -11,6 +11,7 @@ import { initMonitoring, captureError } from './monitoring.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import documentsRouter from './routes/documents.js';
+import docAiRouter from './routes/docAi.js';
 import topicsRouter from './routes/topics.js';
 import questionsRouter from './routes/questions.js';
 import { startWorker } from './worker/index.js';
@@ -262,6 +263,8 @@ app.post('/events', eventsLimiter, optionalAuth, async (req, res) => {
 // Tài liệu (Phase 2)
 // ---------------------------------------------------------------------------
 app.use('/documents', documentsRouter);
+// Tóm tắt + hỏi đáp tài liệu (Phase 3): /documents/:id/summary, /documents/:id/ask
+app.use('/documents', docAiRouter);
 
 // ---------------------------------------------------------------------------
 // Question Bank + AI (Phase 3)

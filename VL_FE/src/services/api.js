@@ -1,4 +1,4 @@
-// Chức năng: các hàm gọi API backend trên Render (health, hồ sơ /me, tài liệu /documents, ghi sự kiện analytics).
+// Chức năng: các hàm gọi API backend trên Render (health, hồ sơ /me, tài liệu /documents, câu hỏi + AI /questions /topics, ghi sự kiện analytics).
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://vietlearn-core.onrender.com'
 
 // Gửi request tới backend. body (nếu có) được gửi dạng JSON.
@@ -104,6 +104,76 @@ export function uploadToSignedUrl(url, file, mimeType, onProgress) {
     xhr.onerror = () => reject(new Error('Lỗi mạng khi tải file lên. Kiểm tra kết nối rồi thử lại.'))
     xhr.send(file)
   })
+}
+
+// ---------- Câu hỏi + AI (Phase 3) ----------
+
+// AI credits còn lại trong tháng: { period, limit, used, reserved, remaining }
+export function getCredits(token) {
+  return request('/questions/credits', { token })
+}
+
+export function listTopics(token) {
+  return request('/topics', { token })
+}
+
+// { subject, chapter, name } -> { topic } (đã có chủ đề y hệt thì trả lại chủ đề cũ)
+export function createTopic(token, data) {
+  return request('/topics', { token, method: 'POST', body: data })
+}
+
+// Tạo job sinh câu hỏi: { documentId, topicId, count, types, pageFrom?, pageTo? } -> { jobId, credits }
+export function generateQuestions(token, data) {
+  return request('/questions/generate', { token, method: 'POST', body: data })
+}
+
+// Tiến độ job: { job: { id, status: queued|running|done|failed, progress, error, result } }
+export function getJob(token, jobId) {
+  return request(`/questions/jobs/${jobId}`, { token })
+}
+
+// Danh sách câu hỏi của tôi (kèm đáp án). filters: { topicId?, documentId?, jobId?, reviewStatus? }
+export function listQuestions(token, filters = {}) {
+  const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString()
+  return request(`/questions${qs ? `?${qs}` : ''}`, { token })
+}
+
+// Nút "Xem nguồn": { source: { documentId, pageNumber, chunkId, text } }
+export function getQuestionSource(token, id) {
+  return request(`/questions/${id}/source`, { token })
+}
+
+// Sửa tay: { stem?, options?, correct?, alternatives?, explanation?, topicId? } (sửa xong về trạng thái nháp)
+export function updateQuestion(token, id, changes) {
+  return request(`/questions/${id}`, { token, method: 'PATCH', body: changes })
+}
+
+export function approveQuestion(token, id) {
+  return request(`/questions/${id}/approve`, { token, method: 'POST' })
+}
+
+// Duyệt tối đa 50 câu một lần -> { approved, skipped }
+export function approveManyQuestions(token, ids) {
+  return request('/questions/approve-many', { token, method: 'POST', body: { ids } })
+}
+
+export function deleteQuestion(token, id) {
+  return request(`/questions/${id}`, { token, method: 'DELETE' })
+}
+
+// Bản tóm tắt đã lưu (miễn phí): { summary: { overview, points: [{ text, pageNumber, chunkId }], createdAt } | null }
+export function getSummary(token, id) {
+  return request(`/documents/${id}/summary`, { token })
+}
+
+// Tạo tóm tắt mới (tốn credits). force=true: tóm tắt lại dù đã có bản lưu.
+export function createSummary(token, id, force = false) {
+  return request(`/documents/${id}/summary`, { token, method: 'POST', body: force ? { force: true } : {} })
+}
+
+// Hỏi đáp: { found, answer, sources: [{ chunkId, pageNumber, text }] }
+export function askDocument(token, id, question) {
+  return request(`/documents/${id}/ask`, { token, method: 'POST', body: { question } })
 }
 
 // Ghi sự kiện analytics ('visit' | 'register'). Lỗi được bỏ qua để không ảnh hưởng người dùng.

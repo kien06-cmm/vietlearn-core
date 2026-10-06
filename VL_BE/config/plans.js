@@ -7,6 +7,9 @@ export const PLANS = {
     pro: { maxFileBytes: 50 * MB, maxDocuments: 200, maxPages: 500, aiCreditsPerMonth: 500, maxQuestionsPerJob: 50 }
 };
 
+// Chi phí AI credits cho từng thao tác (tạo câu hỏi tính theo số câu: 1 credit = 1 câu, xem routes/questions.js)
+export const CREDIT_COST = { summary: 3, ask: 1 };
+
 export function getPlan(name) {
     return PLANS[name] || PLANS.free;
 }

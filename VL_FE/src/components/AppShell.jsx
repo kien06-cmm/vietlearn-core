@@ -4,6 +4,7 @@ import Icon from './Icon.jsx'
 const NAV_ITEMS = [
   { id: 'home', label: 'Trang chủ', icon: 'home' },
   { id: 'documents', label: 'Tài liệu', icon: 'file' },
+  { id: 'questions', label: 'Câu hỏi', icon: 'list' },
   { id: 'quiz', label: 'Quiz', icon: 'target' },
   { id: 'settings', label: 'Cài đặt', icon: 'settings' },
 ]
