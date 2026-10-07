@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { askDocument, createSummary, getDocumentPage, getSummary } from '../services/api.js'
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
+import { creditErrorText } from '../services/credits.js'
 import '../pages/Questions.css'
 
 function clampPage(n, total) {
@@ -43,7 +44,7 @@ function SummaryPanel({ doc, getToken, onGo }) {
       const res = await createSummary(await getToken(), doc.id, force)
       setSummary(res.summary)
     } catch (err) {
-      setError(err.message)
+      setError(creditErrorText(err))
     } finally {
       setBusy(false)
     }
@@ -109,7 +110,7 @@ function AskPanel({ doc, getToken, onGo }) {
     try {
       setResult(await askDocument(await getToken(), doc.id, q))
     } catch (err) {
-      setError(err.message)
+      setError(creditErrorText(err))
     } finally {
       setBusy(false)
     }

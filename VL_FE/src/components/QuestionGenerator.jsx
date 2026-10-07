@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createTopic, generateQuestions, getCredits, getJob } from '../services/api.js'
 import { TYPE_LABELS } from './QuestionCard.jsx'
+import { creditErrorText, nextResetText } from '../services/credits.js'
 import '../pages/Questions.css'
 
 const POLL_MS = 3000
@@ -113,7 +114,7 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
       setJob({ id: res.jobId, status: 'queued', progress: null, error: null, result: null })
       loadCredits()
     } catch (err) {
-      setError(err.message)
+      setError(creditErrorText(err))
     } finally {
       setBusy(false)
     }
@@ -121,6 +122,8 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
 
   const creditPercent = credits && credits.limit ? Math.min(100, ((credits.used + credits.reserved) / credits.limit) * 100) : 0
   const formOk = documentId && topicId && (topicId !== NEW_TOPIC || (newTopic.subject.trim() && newTopic.chapter.trim() && newTopic.name.trim()))
+  const outOfCredits = credits && credits.remaining <= 0
+  const notEnough = credits && !outOfCredits && Number(count) > credits.remaining
 
   return (
     <section className="card">
@@ -134,6 +137,13 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
           <div className="bar" aria-hidden="true">
             <span style={{ width: `${creditPercent}%` }} />
           </div>
+          {outOfCredits ? (
+            <p className="msg msg-error" role="alert">
+              Bạn đã dùng hết AI credits của tháng này. Dùng lại được từ {nextResetText(credits.period)}.
+            </p>
+          ) : (
+            <p className="hint">Credits được làm mới vào {nextResetText(credits.period)}.</p>
+          )}
         </div>
       )}
 
@@ -213,13 +223,20 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
             </label>
           </div>
 
+          {notEnough && (
+            <p className="msg msg-error" role="alert">
+              Chỉ còn {credits.remaining} credits, hãy giảm số câu xuống {credits.remaining} hoặc ít hơn (credits làm mới vào{' '}
+              {nextResetText(credits.period)}).
+            </p>
+          )}
+
           {error && (
             <p className="msg msg-error" role="alert">
               {error}
             </p>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={busy || active || !formOk}>
+          <button className="btn btn-primary" type="submit" disabled={busy || active || !formOk || outOfCredits || notEnough}>
             {busy ? 'Đang gửi...' : active ? 'AI đang làm việc...' : 'Tạo câu hỏi'}
           </button>
         </form>
