@@ -1,7 +1,7 @@
 // Chức năng: trang Câu hỏi (Question Bank) - tạo câu hỏi bằng AI, duyệt từng câu hoặc hàng loạt, sửa, xóa,
 // bấm "Xem nguồn" để mở đúng trang trong tài liệu. Lọc theo chủ đề, tài liệu, trạng thái duyệt.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { approveManyQuestions, listDocuments, listQuestions, listTopics } from '../services/api.js'
+import { approveManyQuestions, deleteTopic, listDocuments, listQuestions, listTopics } from '../services/api.js'
 import QuestionGenerator from '../components/QuestionGenerator.jsx'
 import ImportQuestions from '../components/ImportQuestions.jsx'
 import QuestionCard from '../components/QuestionCard.jsx'
@@ -21,6 +21,8 @@ export default function Questions({ getToken }) {
   const [viewing, setViewing] = useState(null) // { doc, page }
   const [showImport, setShowImport] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [confirmTopic, setConfirmTopic] = useState(false)
+  const [topicBusy, setTopicBusy] = useState(false)
 
   // Tải tài liệu + chủ đề một lần
   useEffect(() => {
@@ -80,6 +82,22 @@ export default function Questions({ getToken }) {
 
   function setFilter(key, value) {
     setFilters((cur) => ({ ...cur, [key]: value, ...(key === 'jobId' ? {} : { jobId: '' }) }))
+    setConfirmTopic(false)
+  }
+
+  async function removeTopic() {
+    setTopicBusy(true)
+    try {
+      await deleteTopic(await getToken(), topicId)
+      setTopics((cur) => cur.filter((t) => t.id !== topicId))
+      setFilters((cur) => ({ ...cur, topicId: '' }))
+      setError('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setTopicBusy(false)
+      setConfirmTopic(false)
+    }
   }
 
   const drafts = (questions || []).filter((q) => q.reviewStatus !== 'approved')
@@ -176,6 +194,25 @@ export default function Questions({ getToken }) {
             <option value="approved">Đã duyệt</option>
           </select>
         </label>
+
+        {topicId && (
+          <div className="span-2 doc-actions">
+            {confirmTopic ? (
+              <>
+                <button className="btn btn-danger" disabled={topicBusy} onClick={removeTopic}>
+                  {topicBusy ? 'Đang xóa...' : 'Xác nhận xóa chủ đề'}
+                </button>
+                <button className="btn btn-secondary" disabled={topicBusy} onClick={() => setConfirmTopic(false)}>
+                  Hủy
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-secondary" onClick={() => setConfirmTopic(true)}>
+                Xóa chủ đề này
+              </button>
+            )}
+          </div>
+        )}
 
         {jobId && (
           <div className="span-2 doc-actions">

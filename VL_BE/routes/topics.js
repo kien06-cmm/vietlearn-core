@@ -59,4 +59,30 @@ router.post('/', rateLimit({ windowMs: 60_000, max: 30, name: 'topics-create' })
     res.status(201).json({ status: 'success', topic: toPublic(ref.id, parsed.data) });
 });
 
+// Xóa chủ đề (chỉ khi không còn câu hỏi nào thuộc chủ đề)
+router.delete('/:id', userOnly, async (req, res) => {
+    const ref = col().doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().ownerId !== req.actor.id) {
+        return res.status(404).json({ status: 'error', message: 'Không tìm thấy chủ đề' });
+    }
+
+    const used = await getDb()
+        .collection('questions')
+        .where('ownerId', '==', req.actor.id)
+        .where('topicId', '==', ref.id)
+        .limit(1)
+        .get();
+    if (!used.empty) {
+        return res.status(409).json({
+            status: 'error',
+            message: 'Chủ đề còn câu hỏi. Hãy xóa hoặc chuyển các câu đó sang chủ đề khác trước.',
+            code: 'topic-in-use'
+        });
+    }
+
+    await ref.delete();
+    res.status(200).json({ status: 'success', message: 'Đã xóa chủ đề' });
+});
+
 export default router;

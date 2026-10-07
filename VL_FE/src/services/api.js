@@ -124,6 +124,11 @@ export function createTopic(token, data) {
   return request('/topics', { token, method: 'POST', body: data })
 }
 
+// Xóa chủ đề (chỉ được khi không còn câu hỏi nào thuộc chủ đề; ngược lại backend trả 409)
+export function deleteTopic(token, id) {
+  return request(`/topics/${id}`, { token, method: 'DELETE' })
+}
+
 // Tạo job sinh câu hỏi: { documentId, topicId, count, types, pageFrom?, pageTo? } -> { jobId, credits }
 export function generateQuestions(token, data) {
   return request('/questions/generate', { token, method: 'POST', body: data })
