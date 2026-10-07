@@ -24,6 +24,7 @@ async function request(path, { token, method = 'GET', body } = {}) {
     err.status = res.status
     err.code = data?.code
     err.resetsAt = data?.resetsAt // có khi hết credits (402): mốc credits được làm mới
+    err.window = data?.window // 'day' | 'week': hạn mức nào đang chặn (hết ngày hay hết tuần)
     throw err
   }
   return res.json()
@@ -109,7 +110,7 @@ export function uploadToSignedUrl(url, file, mimeType, onProgress) {
 
 // ---------- Câu hỏi + AI (Phase 3) ----------
 
-// AI credits còn lại trong tháng: { period, limit, used, reserved, remaining }
+// AI credits còn lại: { period, limit (hạn mức ngày), used, reserved, remaining, window, resetsAt, week: { limit, used, reserved, remaining, resetsAt } }
 export function getCredits(token) {
   return request('/questions/credits', { token })
 }

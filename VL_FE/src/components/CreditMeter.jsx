@@ -12,9 +12,11 @@ function useCreditState() {
   if (!credits) return { credits: null }
 
   const empty = credits.remaining <= 0
-  const low = !empty && credits.limit > 0 && credits.remaining / credits.limit <= LOW_RATIO
-  const ratio = credits.limit > 0 ? Math.min(1, credits.remaining / credits.limit) : 0
-  return { credits, at, left, empty, low, ratio }
+  // Hạn mức đang chặn: tuần (nếu tuần chặt hơn) hoặc ngày. Tính tỉ lệ còn lại theo hạn mức đó.
+  const limit = credits.window === 'week' && credits.week ? credits.week.limit : credits.limit
+  const low = !empty && limit > 0 && credits.remaining / limit <= LOW_RATIO
+  const ratio = limit > 0 ? Math.min(1, credits.remaining / limit) : 0
+  return { credits, at, left, empty, low, ratio, limit }
 }
 
 // compact: dùng trong form tạo câu hỏi (bỏ phần tiêu đề lớn)
@@ -30,7 +32,7 @@ export default function CreditCard({ compact = false, note }) {
     )
   }
 
-  const { credits, at, left, empty, low, ratio } = s
+  const { credits, at, left, empty, low, ratio, limit } = s
   const state = empty ? ' is-empty' : low ? ' is-low' : ''
 
   return (
@@ -40,10 +42,10 @@ export default function CreditCard({ compact = false, note }) {
           <Icon name={empty ? 'clock' : 'spark'} size={compact ? 18 : 20} />
         </span>
         <div className="credit-title">
-          <p className="credit-label">AI credits</p>
+          <p className="credit-label">{credits.window === 'week' ? 'AI credits còn lại trong tuần' : 'AI credits hôm nay'}</p>
           <p className="credit-num">
             <strong>{credits.remaining}</strong>
-            <span>/{credits.limit}</span>
+            <span>/{limit}</span>
           </p>
         </div>
         {note && <p className="credit-note">{note}</p>}
@@ -54,7 +56,7 @@ export default function CreditCard({ compact = false, note }) {
         role="meter"
         aria-label="AI credits còn lại"
         aria-valuemin={0}
-        aria-valuemax={credits.limit}
+        aria-valuemax={limit}
         aria-valuenow={credits.remaining}
       >
         <span style={{ width: `${ratio * 100}%` }} />
@@ -62,7 +64,9 @@ export default function CreditCard({ compact = false, note }) {
 
       {empty ? (
         <div className="credit-wait" role="status">
-          <p className="credit-wait-title">Bạn đã dùng hết credits.</p>
+          <p className="credit-wait-title">
+            {credits.window === 'week' ? 'Bạn đã dùng hết credits của tuần này.' : 'Bạn đã dùng hết credits hôm nay.'}
+          </p>
           <p className="credit-wait-text">
             Dùng lại được sau <b className="count">{formatCountdown(left)}</b>
           </p>
@@ -71,7 +75,15 @@ export default function CreditCard({ compact = false, note }) {
       ) : (
         <p className="credit-reset">
           <Icon name="refresh" size={14} />
-          {low ? 'Sắp hết. ' : ''}Làm mới sau {formatCountdown(left)}
+          {low ? 'Sắp hết. ' : ''}
+          {credits.window === 'week' ? 'Hạn mức tuần làm mới sau ' : 'Làm mới sau '}
+          {formatCountdown(left)}
+        </p>
+      )}
+
+      {!compact && credits.week && (
+        <p className="credit-week">
+          Cả tuần: còn {credits.week.remaining}/{credits.week.limit}
         </p>
       )}
     </section>
@@ -86,7 +98,7 @@ export function CreditChip() {
   const { credits, left, empty, low } = s
   const label = empty
     ? `Hết credits, làm mới sau ${formatCountdown(left)}`
-    : `Còn ${credits.remaining} trên ${credits.limit} AI credits`
+    : `Còn ${credits.remaining} trên ${s.limit} AI credits`
 
   return (
     <a className={`credit-chip${empty ? ' is-empty' : low ? ' is-low' : ''}`} href="#/questions" aria-label={label} title={label}>

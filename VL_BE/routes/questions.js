@@ -6,8 +6,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, getBalance, periodEnd, reserveCredits } from '../credits.js';
+import { creditLimits, getPlan } from '../config/plans.js';
+import { QuotaError, currentPeriod, getBalance, reserveCredits } from '../credits.js';
 import { QUESTION_TYPES, parseQuestion, splitForStorage } from '../ai/questionRules.js';
 import { wakeWorker } from '../worker/index.js';
 
@@ -56,11 +56,11 @@ function rebuildRaw(q, key, patch = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// AI credits còn lại trong tháng
+// AI credits còn lại hôm nay và trong tuần
 // ---------------------------------------------------------------------------
 router.get('/credits', userOnly, async (req, res) => {
     const plan = getPlan(req.profile.plan);
-    const balance = await getBalance(req.actor.id, plan.aiCreditsPerMonth);
+    const balance = await getBalance(req.actor.id, creditLimits(plan));
     res.status(200).json({ status: 'success', credits: balance });
 });
 
@@ -121,7 +121,7 @@ router.post('/generate', generateLimiter, userOnly, async (req, res) => {
             uid,
             jobId: jobRef.id,
             amount: count, // 1 credit = 1 câu hỏi; dùng ít hơn thì hoàn phần dư khi job xong
-            limit: plan.aiCreditsPerMonth,
+            limit: creditLimits(plan),
             writes: (tx) =>
                 tx.set(jobRef, {
                     type: 'generate_questions',
@@ -145,7 +145,9 @@ router.post('/generate', generateLimiter, userOnly, async (req, res) => {
                 })
         });
     } catch (err) {
-        if (err instanceof QuotaError) return fail(res, 402, err.message, 'quota-credits', { resetsAt: periodEnd(period) });
+        if (err instanceof QuotaError) {
+            return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
+        }
         throw err;
     }
 
