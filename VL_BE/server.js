@@ -30,6 +30,8 @@ const origins = process.env.CORS_ORIGIN
     : true;
 
 app.use(cors({ origin: origins }));
+// Riêng route nhập đề có sẵn nhận file dạng base64 (tối đa 2 MB) nên cho phép body lớn hơn. Phải đặt TRƯỚC giới hạn 10kb chung bên dưới.
+app.use('/questions/import', express.json({ limit: '3mb' }));
 app.use(express.json({ limit: '10kb' }));
 app.use(requestLogger);
 

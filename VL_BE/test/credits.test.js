@@ -1,7 +1,17 @@
 // Chức năng: kiểm thử AI Credits - giữ chỗ, chốt, hoàn, và không trừ hai lần. Dùng Firestore giả trong bộ nhớ. Chạy: npm test
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { QuotaError, _useDbForTests, currentPeriod, getBalance, reserveCredits, settleCredits } from '../credits.js';
+import {
+    QuotaError,
+    _useDbForTests,
+    currentPeriod,
+    getBalance,
+    periodEnd,
+    reserveCredits,
+    settleCredits,
+    weekEnd,
+    weekKey
+} from '../credits.js';
 
 // Firestore giả, đủ cho credits.js: collection().doc().get(), runTransaction với tx.get/tx.set (có merge).
 // Transaction chỉ ghi khi hàm chạy xong không lỗi (đúng tính "cùng có hoặc cùng không" của Firestore).
@@ -164,4 +174,61 @@ test('credits của hai người dùng độc lập', async () => {
     await reserveCredits({ uid: 'userB', jobId: 'b1', amount: 50, limit: LIMIT });
     assert.equal((await getBalance('userA', LIMIT)).remaining, 0);
     assert.equal((await getBalance('userB', LIMIT)).remaining, 0);
+});
+
+// ---------- Hạn mức theo ngày + tuần ----------
+const LIMITS = { daily: 10, weekly: 35 };
+const reserveW = (jobId, amount) => reserveCredits({ uid: UID, jobId, amount, limit: LIMITS });
+
+test('tuần bắt đầu từ thứ Hai', () => {
+    assert.equal(weekKey('2026-10-07'), '2026-10-05'); // thứ Năm -> thứ Hai cùng tuần
+    assert.equal(weekKey('2026-10-05'), '2026-10-05');
+    assert.equal(weekKey('2026-10-11'), '2026-10-05'); // Chủ nhật vẫn thuộc tuần trước
+    assert.equal(weekKey('2026-10-12'), '2026-10-12');
+});
+
+test('mốc làm mới tuần sau mốc làm mới ngày, cách nhau tối đa 7 ngày', () => {
+    const day = Date.parse(periodEnd(period));
+    const week = Date.parse(weekEnd(period));
+    assert.ok(week >= day);
+    assert.ok(week - day < 7 * 24 * 3_600_000);
+});
+
+test('hết hạn mức NGÀY: báo window=day và mốc làm mới là cuối ngày', async () => {
+    await reserveW('job1', 10);
+    await assert.rejects(
+        () => reserveW('job2', 1),
+        (err) => err instanceof QuotaError && err.window === 'day' && err.resetsAt === periodEnd(period)
+    );
+    const b = await getBalance(UID, LIMITS);
+    assert.equal(b.remaining, 0);
+    assert.equal(b.window, 'day');
+    assert.equal(b.week.remaining, 25);
+});
+
+test('hết hạn mức TUẦN dù ngày còn: bị chặn và mốc làm mới là cuối tuần', async () => {
+    db.store.set(`creditBalances/${UID}_w${weekKey(period)}`, { used: 33, reserved: 0 });
+    await assert.rejects(
+        () => reserveW('job1', 5),
+        (err) => err instanceof QuotaError && err.window === 'week' && err.resetsAt === weekEnd(period)
+    );
+    const b = await getBalance(UID, LIMITS);
+    assert.equal(b.remaining, 2);
+    assert.equal(b.window, 'week');
+    assert.equal(b.resetsAt, weekEnd(period));
+});
+
+test('giữ chỗ trừ cả ngày lẫn tuần; chốt hoàn phần dư cho cả hai', async () => {
+    await reserveW('job1', 6);
+    let b = await getBalance(UID, LIMITS);
+    assert.equal(b.remaining, 4);
+    assert.equal(b.week.remaining, 29);
+
+    await settleCredits({ uid: UID, jobId: 'job1', period, reserved: 6, actual: 4 });
+    b = await getBalance(UID, LIMITS);
+    assert.equal(b.used, 4);
+    assert.equal(b.remaining, 6);
+    assert.equal(b.week.used, 4);
+    assert.equal(b.week.reserved, 0);
+    assert.equal(b.week.remaining, 31);
 });

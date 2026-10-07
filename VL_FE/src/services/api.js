@@ -163,6 +163,20 @@ export function deleteQuestion(token, id) {
   return request(`/questions/${id}`, { token, method: 'DELETE' })
 }
 
+// Nhập đề có sẵn: { fileName, fileBase64, topicId, confirm? } -> xem trước (không confirm) hoặc lưu (confirm: true)
+export function importQuestions(token, data) {
+  return request('/questions/import', { token, method: 'POST', body: data })
+}
+
+// Tải file mẫu nhập đề ('xlsx' | 'docx') -> Blob
+export async function downloadImportSample(token, format) {
+  const res = await fetch(`${BASE_URL}/questions/import/sample/${format}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Không tải được file mẫu. Vui lòng thử lại.')
+  return res.blob()
+}
+
 // Bản tóm tắt đã lưu (miễn phí): { summary: { overview, points: [{ text, pageNumber, chunkId }], createdAt } | null }
 export function getSummary(token, id) {
   return request(`/documents/${id}/summary`, { token })

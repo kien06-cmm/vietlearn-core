@@ -139,6 +139,72 @@ textarea:focus-visible {
   color: var(--ok);
 }
 
+/* ---------- Nhập đề có sẵn ---------- */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.import-table {
+  width: 100%;
+  min-width: 42rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.import-table th,
+.import-table td {
+  padding: 0.5rem 0.625rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.import-table th {
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.import-table td:nth-child(2) {
+  min-width: 14rem;
+}
+
+.import-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.cell-correct {
+  font-weight: 600;
+  color: var(--ok);
+  background: var(--surface-2);
+}
+
+.import-errors {
+  padding: 0.75rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.import-errors summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.import-errors ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.prompt-box {
+  min-height: 10rem;
+  font-size: 0.8125rem;
+}
+
 /* ---------- Tóm tắt + hỏi đáp trong màn xem tài liệu ---------- */
 .ai-points {
   display: grid;

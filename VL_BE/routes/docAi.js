@@ -7,8 +7,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
 import { requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { CREDIT_COST, getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, periodEnd, reserveCredits, settleCredits } from '../credits.js';
+import { CREDIT_COST, creditLimits, getPlan } from '../config/plans.js';
+import { QuotaError, reserveCredits, settleCredits } from '../credits.js';
 import { AIError, generateJson } from '../ai/provider.js';
 import {
     MAX_CHUNKS_READ,
@@ -54,7 +54,7 @@ async function loadChunks(docRef) {
 // Giữ chỗ credits -> chạy work() -> chốt. work() ném lỗi => hoàn toàn bộ. Chốt lỗi thì chỉ ghi log (không làm hỏng phản hồi).
 async function withCredits({ uid, plan, cost, kind, work }) {
     const jobId = `${kind}_${randomUUID()}`;
-    const { period } = await reserveCredits({ uid, jobId, amount: cost, limit: plan.aiCreditsPerMonth });
+    const { period } = await reserveCredits({ uid, jobId, amount: cost, limit: creditLimits(plan) });
 
     let actual = 0;
     try {
@@ -71,7 +71,9 @@ async function withCredits({ uid, plan, cost, kind, work }) {
 
 // Đổi lỗi quota/AI thành phản hồi cho người dùng; lỗi khác để middleware lỗi chung xử lý
 function handleAiError(res, err) {
-    if (err instanceof QuotaError) return fail(res, 402, err.message, 'quota-credits', { resetsAt: periodEnd(currentPeriod()) });
+    if (err instanceof QuotaError) {
+        return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
+    }
     if (err instanceof AIError) {
         log('error', 'AI lỗi', { code: err.code, error: err.message });
         const status = err.code === 'ai-no-key' ? 503 : 502;

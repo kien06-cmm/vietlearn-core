@@ -725,6 +725,16 @@ a.btn {
   color: var(--ink);
 }
 
+/* Hạn mức cả tuần, nhỏ và mờ dưới thẻ credits */
+.credit-week {
+  margin: 0;
+  padding-top: 0.625rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  border-top: 1px dashed var(--line);
+}
+
 /* Khung chờ khi đang tải dữ liệu: nhẹ và đỡ giật hơn dòng chữ "Đang tải..." */
 .skeleton {
   display: block;

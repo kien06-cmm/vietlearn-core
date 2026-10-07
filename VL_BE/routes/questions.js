@@ -8,7 +8,10 @@ import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { creditLimits, getPlan } from '../config/plans.js';
 import { QuotaError, currentPeriod, getBalance, reserveCredits } from '../credits.js';
-import { QUESTION_TYPES, parseQuestion, splitForStorage } from '../ai/questionRules.js';
+import { QUESTION_TYPES, parseQuestion, splitForStorage, stemKey } from '../ai/questionRules.js';
+import { MAX_IMPORT_BYTES, ImportFileError, readImportFile } from '../ai/importFile.js';
+import { finalizeImport } from '../ai/importRules.js';
+import { SAMPLE_FORMATS, buildSample } from '../ai/importSamples.js';
 import { wakeWorker } from '../worker/index.js';
 
 const router = Router();
@@ -36,6 +39,7 @@ function toPublic(id, q, key) {
         source: q.source || null,
         reviewStatus: q.reviewStatus,
         jobId: q.jobId || null,
+        origin: q.origin || 'ai', // 'ai' (sinh từ tài liệu) | 'import' (nhập từ file có sẵn)
         createdAt: iso(q.createdAt),
         ...(key ? { answer: { correct: key.correct, alternatives: key.alternatives || [] } } : {})
     };
@@ -45,7 +49,7 @@ function toPublic(id, q, key) {
 function rebuildRaw(q, key, patch = {}) {
     const raw = {
         type: q.type,
-        chunkId: q.source?.chunkId,
+        chunkId: q.source?.chunkId ?? 'import', // câu nhập từ file không có đoạn nguồn
         stem: q.stem,
         explanation: q.explanation || undefined,
         correct: key?.correct,
@@ -179,6 +183,94 @@ router.get(
         });
     }
 );
+
+// ---------------------------------------------------------------------------
+// Nhập đề trắc nghiệm có sẵn (Word/Excel/TXT): đọc bằng luật, KHÔNG gọi AI, KHÔNG tốn credits.
+// confirm=false: chỉ xem trước (đọc được bao nhiêu câu, câu nào bị bỏ và vì sao). confirm=true: lưu các câu hợp lệ (trạng thái nháp, chờ duyệt).
+// ---------------------------------------------------------------------------
+const importSchema = z
+    .object({
+        fileName: z.string().min(1).max(200),
+        fileBase64: z.string().min(1).max(Math.ceil((MAX_IMPORT_BYTES * 4) / 3) + 8),
+        topicId: z.string().min(1).max(100),
+        confirm: z.boolean().optional()
+    })
+    .strict();
+
+const importLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'questions-import' });
+
+router.post('/import', importLimiter, userOnly, async (req, res) => {
+    const parsed = importSchema.safeParse(req.body);
+    if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+    const { fileName, fileBase64, topicId, confirm } = parsed.data;
+    const uid = req.actor.id;
+    const db = getDb();
+
+    const topicSnap = await db.collection('topics').doc(topicId).get();
+    if (!topicSnap.exists || topicSnap.data().ownerId !== uid) return fail(res, 404, 'Không tìm thấy chủ đề');
+
+    let items;
+    try {
+        items = await readImportFile({ fileName, buffer: Buffer.from(fileBase64, 'base64') });
+    } catch (err) {
+        if (err instanceof ImportFileError) return fail(res, 400, err.message, 'import-file');
+        throw err;
+    }
+
+    // Loại câu trùng với kho của chính người dùng (cũng chặn bấm xác nhận hai lần tạo câu trùng)
+    const existing = await questions().where('ownerId', '==', uid).limit(300).get();
+    const { questions: valid, errors } = finalizeImport(items, {
+        seenKeys: existing.docs.map((d) => stemKey(d.data().stem))
+    });
+    const summary = { found: items.length, valid: valid.length, skipped: errors.length, errors: errors.slice(0, 100) };
+
+    if (!confirm) {
+        return res.status(200).json({
+            status: 'success',
+            ...summary,
+            preview: valid.slice(0, 50).map(({ label, q }) => ({ label, stem: q.stem, options: q.options, correct: q.correct }))
+        });
+    }
+
+    if (!valid.length) return fail(res, 400, 'Không có câu hợp lệ nào để nhập', 'nothing-to-import', { skipped: errors.length });
+
+    const batch = db.batch(); // tối đa 200 câu x 2 bản ghi = 400, dưới giới hạn 500 của Firestore
+    for (const { q } of valid) {
+        const ref = questions().doc();
+        const { question, key } = splitForStorage({ ...q, source: null });
+        batch.set(ref, {
+            ownerId: uid,
+            topicId,
+            ...question,
+            reviewStatus: 'draft',
+            jobId: null,
+            origin: 'import',
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        batch.set(answerKeys().doc(ref.id), { ownerId: uid, ...key });
+    }
+    await batch.commit();
+
+    res.status(201).json({ status: 'success', ...summary, imported: valid.length });
+});
+
+// Tải file mẫu nhập đề (xlsx | docx)
+const sampleLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'questions-import-sample' });
+
+router.get('/import/sample/:format', sampleLimiter, userOnly, async (req, res) => {
+    const { format } = req.params;
+    if (!SAMPLE_FORMATS.includes(format)) return fail(res, 404, 'Không có file mẫu định dạng này');
+
+    const { buffer, fileName, contentType } = await buildSample(format);
+    res.status(200)
+        .set({
+            'Content-Type': contentType,
+            'Content-Disposition': `attachment; filename="${fileName}"`,
+            'Cache-Control': 'no-store'
+        })
+        .send(buffer);
+});
 
 // ---------------------------------------------------------------------------
 // Duyệt hàng loạt (đặt TRƯỚC các route /:id)

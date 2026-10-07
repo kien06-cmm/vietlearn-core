@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { approveManyQuestions, listDocuments, listQuestions, listTopics } from '../services/api.js'
 import QuestionGenerator from '../components/QuestionGenerator.jsx'
+import ImportQuestions from '../components/ImportQuestions.jsx'
 import QuestionCard from '../components/QuestionCard.jsx'
 import DocumentViewer from '../components/DocumentViewer.jsx'
 import './Questions.css'
@@ -18,6 +19,8 @@ export default function Questions({ getToken }) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState('')
   const [viewing, setViewing] = useState(null) // { doc, page }
+  const [showImport, setShowImport] = useState(false)
+  const [refresh, setRefresh] = useState(0)
 
   // Tải tài liệu + chủ đề một lần
   useEffect(() => {
@@ -53,7 +56,7 @@ export default function Questions({ getToken }) {
 
   useEffect(() => {
     loadQuestions()
-  }, [loadQuestions])
+  }, [loadQuestions, refresh])
 
   const topicLabels = useMemo(
     () => Object.fromEntries(topics.map((t) => [t.id, `${t.subject} › ${t.chapter} › ${t.name}`])),
@@ -67,6 +70,12 @@ export default function Questions({ getToken }) {
   // Job xong: chỉ hiện câu của job đó (để duyệt ngay), bấm "Xem tất cả" để bỏ lọc
   const handleJobDone = useCallback((id) => {
     setFilters({ topicId: '', documentId: '', reviewStatus: '', jobId: id })
+  }, [])
+
+  // Nhập đề xong: hiện các câu nháp của chủ đề vừa nhập
+  const handleImported = useCallback((importedTopicId) => {
+    setFilters({ topicId: importedTopicId, documentId: '', reviewStatus: 'draft', jobId: '' })
+    setRefresh((n) => n + 1)
   }, [])
 
   function setFilter(key, value) {
@@ -123,8 +132,15 @@ export default function Questions({ getToken }) {
     <>
       <section>
         <h1>Câu hỏi</h1>
-        <p className="hint">Tạo câu hỏi từ tài liệu, duyệt rồi lưu vào ngân hàng câu hỏi.</p>
+        <p className="hint">Tạo câu hỏi từ tài liệu hoặc nhập đề có sẵn, duyệt rồi lưu vào ngân hàng câu hỏi.</p>
+        <button className="btn btn-secondary" aria-expanded={showImport} onClick={() => setShowImport((v) => !v)}>
+          {showImport ? 'Đóng nhập đề' : 'Nhập đề có sẵn'}
+        </button>
       </section>
+
+      {showImport && (
+        <ImportQuestions getToken={getToken} topics={topics} onTopicCreated={handleTopicCreated} onImported={handleImported} />
+      )}
 
       <QuestionGenerator getToken={getToken} docs={docs} topics={topics} onTopicCreated={handleTopicCreated} onDone={handleJobDone} />
 
@@ -182,7 +198,7 @@ export default function Questions({ getToken }) {
       {questions && questions.length === 0 && (
         <section className="card empty">
           <h2>Chưa có câu hỏi nào</h2>
-          <p className="hint">Chọn một tài liệu ở trên rồi bấm "Tạo câu hỏi".</p>
+          <p className="hint">Chọn một tài liệu ở trên rồi bấm "Tạo câu hỏi", hoặc bấm "Nhập đề có sẵn".</p>
         </section>
       )}
 

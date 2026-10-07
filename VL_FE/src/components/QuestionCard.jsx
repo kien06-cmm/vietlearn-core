@@ -194,6 +194,7 @@ export default function QuestionCard({ q, topicLabel, getToken, onChanged, onRem
         <span className={`badge ${approved ? 'badge-ok' : 'badge-draft'}`}>{approved ? 'Đã duyệt' : 'Nháp'}</span>
         {topicLabel && <span className="chip">{topicLabel}</span>}
         {q.source?.pageNumber && <span className="chip">Trang {q.source.pageNumber}</span>}
+        {q.origin === 'import' && <span className="chip">Nhập từ file</span>}
       </div>
 
       {mode === 'edit' ? (
@@ -273,9 +274,11 @@ export default function QuestionCard({ q, topicLabel, getToken, onChanged, onRem
               Duyệt
             </button>
           )}
-          <button className="btn btn-secondary" disabled={busy} onClick={toggleSource}>
-            {source ? 'Ẩn nguồn' : 'Xem nguồn'}
-          </button>
+          {q.source && (
+            <button className="btn btn-secondary" disabled={busy} onClick={toggleSource}>
+              {source ? 'Ẩn nguồn' : 'Xem nguồn'}
+            </button>
+          )}
           <button className="btn btn-secondary" disabled={busy} onClick={() => setMode('edit')}>
             Sửa
           </button>

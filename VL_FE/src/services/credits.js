@@ -1,14 +1,16 @@
 // Chức năng: tính và hiển thị thời điểm AI credits được làm mới.
-// Backend trả sẵn mốc `resetsAt` (ISO); giao diện chỉ đếm ngược tới mốc đó nên khi backend đổi chu kỳ
-// (tháng, tuần, hay vài giờ) thì giao diện không phải sửa gì. Hiện tại credits tính theo THÁNG (giờ UTC):
-// reset 0h UTC ngày 1 tháng sau = 7h sáng ngày 1 theo giờ Việt Nam.
+// Backend trả sẵn mốc `resetsAt` (ISO) của hạn mức đang chặn (ngày hoặc tuần); giao diện chỉ đếm ngược tới mốc đó
+// nên khi backend đổi chu kỳ thì giao diện không phải sửa gì. Hiển thị theo múi giờ của trình duyệt.
 
-// Mốc reset: ưu tiên `resetsAt` từ backend; chỉ có `period` ("2026-10") thì tự suy ra cuối tháng đó
+// Mốc reset: ưu tiên `resetsAt` từ backend. Thiếu thì suy ra từ `period`: ngày "2026-10-07" -> 0h giờ Việt Nam ngày hôm sau;
+// tháng "2026-10" (bản backend cũ) -> đầu tháng sau.
 export function resetDate({ resetsAt, period } = {}) {
   if (resetsAt) {
     const d = new Date(resetsAt)
     if (!Number.isNaN(d.getTime())) return d
   }
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(period))
+  if (day) return new Date(Date.UTC(+day[1], +day[2] - 1, +day[3] + 1) - 7 * 3600_000)
   const now = new Date()
   const [y, m] = /^\d{4}-\d{2}$/.test(String(period))
     ? String(period).split('-').map(Number)
