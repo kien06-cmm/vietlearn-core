@@ -5,14 +5,14 @@ textarea {
   min-height: 5rem;
   padding: 0.625rem 0.875rem;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   resize: vertical;
 }
 
 textarea:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--blue) 50%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: 1px;
 }
 
@@ -156,14 +156,14 @@ textarea:focus-visible {
 
 .page-link {
   flex-shrink: 0;
-  padding: 0.125rem 0.625rem;
+  padding: 0.125rem 0.5rem;
   font: inherit;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--blue);
+  color: var(--accent);
   background: var(--tint);
   border: 0;
-  border-radius: 999px;
+  border-radius: 4px;
   cursor: pointer;
 }
 

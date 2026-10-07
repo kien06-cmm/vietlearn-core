@@ -68,8 +68,8 @@ export default function DocumentCard({ doc, onOpen, onOriginal, onPatch, onDelet
   return (
     <article className="card doc">
       <div className="doc-head">
-        <span className="tile-icon">
-          <Icon name="file" size={22} />
+        <span className="doc-ext" aria-hidden="true">
+          {ext.length <= 5 ? ext : 'FILE'}
         </span>
         <div className="doc-title">
           <h3>{doc.name}</h3>

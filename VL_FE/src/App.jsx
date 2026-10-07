@@ -11,7 +11,6 @@ import Settings from './pages/Settings.jsx'
 import Documents from './pages/Documents.jsx'
 import Questions from './pages/Questions.jsx'
 import ComingSoon from './pages/ComingSoon.jsx'
-import Icon from './components/Icon.jsx'
 import './App.css'
 
 function App() {
@@ -74,11 +73,9 @@ function App() {
     return (
       <main className="page">
         <div className="login-hero">
-          <span className="logo-mark logo-mark-lg">
-            <Icon name="cap" size={30} />
-          </span>
-          <h1>Chào mừng đến với VietLearn!</h1>
-          <p className="hint">Học nhanh hơn, ôn đúng chỗ yếu.</p>
+          <img className="login-logo" src="/logo.png" alt="VietLearn" />
+          <h1>Học nhanh hơn, ôn đúng chỗ yếu.</h1>
+          <p className="hint">Đăng nhập hoặc tạo tài khoản để bắt đầu.</p>
         </div>
         <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
       </main>
@@ -112,6 +109,7 @@ function App() {
           onResend={handleResend}
           onCheckVerified={handleCheckVerified}
           verifyMsg={verifyMsg}
+          getToken={getToken}
         />
       )}
       {route === 'documents' && <Documents getToken={getToken} />}

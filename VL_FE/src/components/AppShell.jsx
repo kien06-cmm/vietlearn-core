@@ -1,4 +1,4 @@
-// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (logo + tên thương hiệu), nội dung, thanh điều hướng dưới cho điện thoại.
+// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (tên thương hiệu), nội dung, thanh điều hướng dưới cho điện thoại.
 import Icon from './Icon.jsx'
 
 const NAV_ITEMS = [
@@ -14,10 +14,9 @@ export default function AppShell({ route, planLabel, children }) {
     <div className="shell">
       <header className="shell-header">
         <div className="brand-wrap">
-          <span className="logo-mark">
-            <Icon name="cap" size={18} />
+          <span className="wordmark">
+            Viet<span>Learn</span>
           </span>
-          <span className="brand">VietLearn</span>
         </div>
         {planLabel && <span className="badge">{planLabel}</span>}
       </header>
@@ -34,7 +33,7 @@ export default function AppShell({ route, planLabel, children }) {
               aria-current={route === item.id ? 'page' : undefined}
             >
               <span className="nav-icon">
-                <Icon name={item.icon} size={22} />
+                <Icon name={item.icon} size={21} />
               </span>
               {item.label}
             </a>
