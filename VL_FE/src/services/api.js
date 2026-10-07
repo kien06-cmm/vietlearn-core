@@ -23,6 +23,7 @@ async function request(path, { token, method = 'GET', body } = {}) {
     const err = new Error(data?.message || `Backend trả về lỗi ${res.status}`)
     err.status = res.status
     err.code = data?.code
+    err.resetsAt = data?.resetsAt // có khi hết credits (402): mốc credits được làm mới
     throw err
   }
   return res.json()

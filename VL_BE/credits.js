@@ -22,6 +22,13 @@ export class QuotaError extends Error {
 // Kỳ tính credits: tháng theo UTC, ví dụ "2026-10"
 export const currentPeriod = (date = new Date()) => date.toISOString().slice(0, 7);
 
+// Thời điểm kỳ kết thúc = lúc credits được làm mới (đầu tháng sau, 0h UTC), dạng ISO.
+// Giao diện đếm ngược theo mốc này. Muốn đổi sang chu kỳ khác (vd: mỗi 8 giờ) thì chỉ cần sửa hàm này và currentPeriod.
+export const periodEnd = (period) => {
+    const [y, m] = period.split('-').map(Number);
+    return new Date(Date.UTC(y, m, 1)).toISOString();
+};
+
 const balanceRef = (uid, period) => getDb().collection('creditBalances').doc(`${uid}_${period}`);
 const ledgerCol = () => getDb().collection('creditLedger');
 
@@ -31,7 +38,7 @@ export async function getBalance(uid, limit) {
     const snap = await balanceRef(uid, period).get();
     const used = snap.data()?.used ?? 0;
     const reserved = snap.data()?.reserved ?? 0;
-    return { period, limit, used, reserved, remaining: Math.max(0, limit - used - reserved) };
+    return { period, limit, used, reserved, remaining: Math.max(0, limit - used - reserved), resetsAt: periodEnd(period) };
 }
 
 // Kiểm tra quota rồi giữ chỗ `amount` credits. `writes(tx)` (tùy chọn) chạy trong CÙNG transaction

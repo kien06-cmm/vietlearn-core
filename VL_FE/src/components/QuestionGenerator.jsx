@@ -1,9 +1,11 @@
 // Chức năng: form tạo câu hỏi bằng AI từ một tài liệu - chọn tài liệu, chủ đề (Môn > Chương > Chủ đề), số câu, dạng câu, khoảng trang;
 // theo dõi tiến độ job; hiện AI credits còn lại. Khi job xong gọi onDone(jobId, result) để màn duyệt tải câu hỏi mới.
-import { useCallback, useEffect, useState } from 'react'
-import { createTopic, generateQuestions, getCredits, getJob } from '../services/api.js'
+import { useEffect, useState } from 'react'
+import { createTopic, generateQuestions, getJob } from '../services/api.js'
 import { TYPE_LABELS } from './QuestionCard.jsx'
-import { creditErrorText, nextResetText } from '../services/credits.js'
+import { creditErrorText, formatResetAt, resetDate } from '../services/credits.js'
+import { useCredits } from '../hooks/useCredits.jsx'
+import CreditCard from './CreditMeter.jsx'
 import '../pages/Questions.css'
 
 const POLL_MS = 3000
@@ -41,22 +43,10 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
   const [types, setTypes] = useState(['single'])
   const [pageFrom, setPageFrom] = useState('')
   const [pageTo, setPageTo] = useState('')
-  const [credits, setCredits] = useState(null)
+  const { credits, reload: loadCredits } = useCredits()
   const [job, setJob] = useState(null) // { id, status, progress, error, result }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  const loadCredits = useCallback(async () => {
-    try {
-      setCredits((await getCredits(await getToken())).credits)
-    } catch {
-      // không hiện được credits thì vẫn dùng tiếp, backend vẫn kiểm tra quota
-    }
-  }, [getToken])
-
-  useEffect(() => {
-    loadCredits()
-  }, [loadCredits])
 
   const jobId = job?.id
   const active = job && (job.status === 'queued' || job.status === 'running')
@@ -115,12 +105,12 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
       loadCredits()
     } catch (err) {
       setError(creditErrorText(err))
+      if (err.code === 'quota-credits') loadCredits() // hiện thẻ hết credits kèm đếm ngược
     } finally {
       setBusy(false)
     }
   }
 
-  const creditPercent = credits && credits.limit ? Math.min(100, ((credits.used + credits.reserved) / credits.limit) * 100) : 0
   const formOk = documentId && topicId && (topicId !== NEW_TOPIC || (newTopic.subject.trim() && newTopic.chapter.trim() && newTopic.name.trim()))
   const outOfCredits = credits && credits.remaining <= 0
   const notEnough = credits && !outOfCredits && Number(count) > credits.remaining
@@ -129,23 +119,7 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
     <section className="card">
       <h2>Tạo câu hỏi bằng AI</h2>
 
-      {credits && (
-        <div className="credit-line">
-          <p className="hint">
-            AI credits tháng {credits.period}: còn {credits.remaining}/{credits.limit} (1 credit = 1 câu hỏi)
-          </p>
-          <div className="bar" aria-hidden="true">
-            <span style={{ width: `${creditPercent}%` }} />
-          </div>
-          {outOfCredits ? (
-            <p className="msg msg-error" role="alert">
-              Bạn đã dùng hết AI credits của tháng này. Dùng lại được từ {nextResetText(credits.period)}.
-            </p>
-          ) : (
-            <p className="hint">Credits được làm mới vào {nextResetText(credits.period)}.</p>
-          )}
-        </div>
-      )}
+      <CreditCard compact note="1 credit = 1 câu hỏi" />
 
       {readyDocs.length === 0 ? (
         <p className="hint">Chưa có tài liệu nào ở trạng thái "Sẵn sàng". Hãy tải tài liệu lên ở mục Tài liệu trước.</p>
@@ -225,8 +199,8 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
 
           {notEnough && (
             <p className="msg msg-error" role="alert">
-              Chỉ còn {credits.remaining} credits, hãy giảm số câu xuống {credits.remaining} hoặc ít hơn (credits làm mới vào{' '}
-              {nextResetText(credits.period)}).
+              Chỉ còn {credits.remaining} credits, hãy giảm số câu xuống {credits.remaining} hoặc ít hơn (credits làm mới lúc{' '}
+              {formatResetAt(resetDate(credits))}).
             </p>
           )}
 

@@ -1,4 +1,6 @@
-// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (tên thương hiệu), nội dung, thanh điều hướng dưới cho điện thoại.
+// Chức năng: khung ứng dụng sau đăng nhập - thanh trên (logo, tên thương hiệu, chip AI credits), nội dung, thanh điều hướng dưới cho điện thoại.
+import BrandMark from './BrandMark.jsx'
+import { CreditChip } from './CreditMeter.jsx'
 import Icon from './Icon.jsx'
 
 const NAV_ITEMS = [
@@ -13,15 +15,22 @@ export default function AppShell({ route, planLabel, children }) {
   return (
     <div className="shell">
       <header className="shell-header">
-        <div className="brand-wrap">
+        <a className="brand-wrap" href="#/home" aria-label="VietLearn - về Trang chủ">
+          <BrandMark size={30} />
           <span className="wordmark">
             Viet<span>Learn</span>
           </span>
+        </a>
+        <div className="header-right">
+          <CreditChip />
+          {planLabel && <span className="badge badge-plan">{planLabel}</span>}
         </div>
-        {planLabel && <span className="badge">{planLabel}</span>}
       </header>
 
-      <main className="shell-main">{children}</main>
+      {/* key theo route: đổi trang thì phát lại hiệu ứng xuất hiện */}
+      <main className="shell-main" key={route}>
+        {children}
+      </main>
 
       <nav className="bottom-nav" aria-label="Menu chính">
         <div className="bottom-nav-inner">

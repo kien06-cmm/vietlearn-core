@@ -5,6 +5,7 @@ import { askDocument, createSummary, getDocumentPage, getSummary } from '../serv
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
 import { creditErrorText } from '../services/credits.js'
+import { useCredits } from '../hooks/useCredits.jsx'
 import '../pages/Questions.css'
 
 function clampPage(n, total) {
@@ -25,6 +26,7 @@ function SummaryPanel({ doc, getToken, onGo }) {
   const [summary, setSummary] = useState(undefined) // undefined: đang tải, null: chưa có
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const { reload: reloadCredits } = useCredits()
 
   useEffect(() => {
     let cancelled = false
@@ -43,8 +45,10 @@ function SummaryPanel({ doc, getToken, onGo }) {
     try {
       const res = await createSummary(await getToken(), doc.id, force)
       setSummary(res.summary)
+      reloadCredits()
     } catch (err) {
       setError(creditErrorText(err))
+      if (err.code === 'quota-credits') reloadCredits()
     } finally {
       setBusy(false)
     }
@@ -99,6 +103,7 @@ function AskPanel({ doc, getToken, onGo }) {
   const [result, setResult] = useState(null) // { found, answer, sources }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const { reload: reloadCredits } = useCredits()
 
   async function submit(e) {
     e.preventDefault()
@@ -109,8 +114,10 @@ function AskPanel({ doc, getToken, onGo }) {
     setResult(null)
     try {
       setResult(await askDocument(await getToken(), doc.id, q))
+      reloadCredits()
     } catch (err) {
       setError(creditErrorText(err))
+      if (err.code === 'quota-credits') reloadCredits()
     } finally {
       setBusy(false)
     }

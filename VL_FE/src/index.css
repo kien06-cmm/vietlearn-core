@@ -1,23 +1,36 @@
-/* Design tokens VietLearn: tông xanh dương theo logo (một màu nhấn phẳng, không chuyển màu), tiêu đề có chân,
-   hỗ trợ chế độ tối và 3 cỡ chữ (data-theme, data-font trên <html>) */
+/* Design tokens VietLearn. Nhận diện: "trang vở học trò" - giấy ấm màu kem, mực xanh theo logo, vệt bút dạ quang vàng làm điểm nhấn,
+   tiêu đề có chân. Hỗ trợ chế độ tối và 3 cỡ chữ (data-theme, data-font trên <html>). */
 :root {
   color-scheme: light;
   --accent: #1769e0;
   --on-accent: #ffffff;
-  --ink: #0f1f45;
-  --muted: #55627f;
-  --line: #dde4f2;
-  --bg: #f6f8fc;
-  --surface: #ffffff;
-  --surface-2: #edf1f9;
-  --tint: #e3edff; /* nền nhạt cho ô icon, huy hiệu */
+  --ink: #14213d;
+  --muted: #5d6987;
+  --line: #e4ddcc;
+  --bg: #fbf8f1; /* giấy ấm */
+  --surface: #fffefb;
+  --surface-2: #f4efe3;
+  --tint: #e4edff; /* nền nhạt cho ô icon, huy hiệu */
   --danger: #c62839;
   --warn-bg: #fff4dc;
   --warn-line: #e8cf94;
+  --warn-ink: #7a5200;
   --ok: #1f8a5b;
-  --radius: 10px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 0 rgba(15, 31, 69, 0.04);
+
+  /* Dấu ấn thương hiệu: bút dạ quang vàng, lề đỏ và dòng kẻ của trang vở */
+  --hl: #ffdf5c;
+  --hl-soft: #fff0b3;
+  --hl-ink: #3a2c00;
+  --amber: #d99a00;
+  --margin: rgba(214, 76, 92, 0.38);
+  --rule: rgba(23, 105, 224, 0.1);
+  --grid: rgba(23, 105, 224, 0.06);
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 2px rgba(20, 33, 61, 0.05), 0 8px 20px -10px rgba(20, 33, 61, 0.14);
+  --shadow-lift: 0 2px 4px rgba(20, 33, 61, 0.06), 0 16px 30px -14px rgba(20, 33, 61, 0.24);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
   --font-display: 'Lora', Georgia, 'Times New Roman', serif;
 
@@ -41,13 +54,25 @@
   --danger: #ff8a95;
   --warn-bg: #2e2a1f;
   --warn-line: #5a4a22;
+  --warn-ink: #f3cf6a;
   --ok: #5ed3a0;
-  --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+
+  --hl: #f3cf4a;
+  --hl-soft: rgba(243, 207, 74, 0.2);
+  --hl-ink: #2b2100;
+  --amber: #f3cf4a;
+  --margin: rgba(255, 138, 149, 0.34);
+  --rule: rgba(106, 165, 255, 0.09);
+  --grid: rgba(106, 165, 255, 0.05);
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 20px -10px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.35), 0 16px 30px -14px rgba(0, 0, 0, 0.6);
 }
 
 /* Cỡ chữ: mọi kích thước trong CSS dùng rem nên đổi ở đây là cả giao diện đổi theo */
 html {
   font-size: 16px;
+  scroll-behavior: smooth;
 }
 
 html[data-font='sm'] {
@@ -69,10 +94,74 @@ body {
   color: var(--ink);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Lưới ô li mờ ở nền, nhạt dần xuống dưới để không rối mắt khi đọc */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: linear-gradient(#000, transparent 75%);
+  mask-image: linear-gradient(#000, transparent 75%);
+}
+
+::selection {
+  color: var(--hl-ink);
+  background: var(--hl);
 }
 
 /* Tiêu đề dùng font có chân để app có cá tính riêng, nội dung vẫn dùng font không chân dễ đọc */
 h1,
 h2 {
   font-family: var(--font-display);
+}
+
+/* Vệt bút dạ quang: được "tô" dần từ trái sang phải khi trang hiện ra */
+mark {
+  padding: 0 0.15em;
+  margin: 0 -0.15em;
+  color: inherit;
+  background: linear-gradient(transparent 56%, var(--hl) 56%, var(--hl) 92%, transparent 92%) no-repeat;
+  background-size: 100% 100%;
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: hl-draw 0.8s 0.3s var(--ease) both;
+}
+
+@keyframes hl-draw {
+  from {
+    background-size: 0% 100%;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

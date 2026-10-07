@@ -1,5 +1,5 @@
 /* Giao diện VietLearn: mobile-first (một cột, thanh điều hướng dưới), dùng token trong index.css.
-   Phong cách sổ tay: nền giấy, một màu nhấn, tiêu đề có chân, ít thẻ, ít bóng đổ. */
+   Phong cách "trang vở": giấy ấm, mực xanh, vệt dạ quang vàng, tiêu đề có chân, chuyển động nhẹ và mượt. */
 
 /* ---------- Chữ ---------- */
 h1 {
@@ -29,6 +29,13 @@ h3 {
   color: var(--muted);
 }
 
+.lead {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 .icon {
   display: block;
   flex-shrink: 0;
@@ -48,6 +55,42 @@ h3 {
   color: var(--accent);
 }
 
+.wordmark-lg {
+  font-size: 1.75rem;
+}
+
+/* Biểu tượng thương hiệu (components/BrandMark.jsx) */
+.brand-mark {
+  flex-shrink: 0;
+  transition: transform 0.35s var(--ease);
+}
+
+.bm-bg {
+  fill: var(--accent);
+}
+
+.bm-page {
+  fill: var(--on-accent);
+}
+
+.bm-page-r {
+  fill-opacity: 0.86;
+}
+
+.bm-hl {
+  fill: var(--hl);
+}
+
+.bm-line {
+  fill: var(--accent);
+  fill-opacity: 0.4;
+}
+
+.brand-wrap:hover .brand-mark,
+.login-brand:hover .brand-mark {
+  transform: rotate(-6deg) scale(1.06);
+}
+
 /* ---------- Trang đăng nhập ---------- */
 .page {
   max-width: 440px;
@@ -57,27 +100,60 @@ h3 {
   gap: 1.5rem;
 }
 
+.page-login {
+  padding-top: 3.5rem;
+}
+
+.page-login > * {
+  animation: rise 0.6s var(--ease) both;
+}
+
+.page-login > :nth-child(2) {
+  animation-delay: 0.12s;
+}
+
 .login-hero {
   display: grid;
+  gap: 0.875rem;
+}
+
+.login-hero h1 {
+  font-size: 2.125rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.login-points {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.login-hero .wordmark {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 2px solid var(--accent);
-  justify-self: start;
+.login-points li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem 0.375rem 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
 }
 
-/* Logo trang đăng nhập: giới hạn chiều rộng, bo góc phòng khi ảnh có nền riêng */
-.login-logo {
-  display: block;
-  width: 100%;
-  max-width: 240px;
-  height: auto;
-  margin-bottom: 0.5rem;
-  border-radius: 12px;
+.login-points .icon {
+  color: var(--accent);
 }
 
 /* ---------- Thành phần dùng chung ---------- */
@@ -135,6 +211,11 @@ input {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+input:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
 
 input[type='checkbox'] {
@@ -152,15 +233,19 @@ a:focus-visible {
   outline-offset: 1px;
 }
 
+input:focus-visible {
+  border-color: var(--accent);
+}
+
 .btn {
   font: inherit;
   font-weight: 600;
   min-height: 2.75rem; /* đủ lớn để chạm bằng ngón tay */
-  padding: 0.625rem 1rem;
+  padding: 0.625rem 1.125rem;
   border: 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: transform 0.1s, filter 0.15s;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s, filter 0.2s, background-color 0.2s;
 }
 
 /* Liên kết trông như nút (dùng thẻ <a> cho việc chuyển trang) */
@@ -171,28 +256,39 @@ a.btn {
   text-decoration: none;
 }
 
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
-.btn:hover:not(:disabled) {
-  filter: brightness(1.06);
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .btn-primary {
   color: var(--on-accent);
   background: var(--accent);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 16px -8px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 12px 20px -8px color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
 .btn-secondary {
   color: var(--ink);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--line);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--surface-2);
 }
 
 .btn-danger {
@@ -209,6 +305,11 @@ a.btn {
   background: none;
   border: 0;
   cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-link:hover {
+  opacity: 0.75;
 }
 
 .msg {
@@ -222,12 +323,27 @@ a.btn {
 
 .badge {
   justify-self: start;
-  padding: 0.125rem 0.5rem;
+  padding: 0.125rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--accent);
   background: var(--tint);
-  border-radius: 4px;
+  border-radius: 999px;
+}
+
+.badge-plan {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+}
+
+.badge-soon {
+  margin-left: 0.5rem;
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  color: var(--hl-ink);
+  background: var(--hl-soft);
+  vertical-align: middle;
 }
 
 .row {
@@ -257,15 +373,60 @@ a.btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
-  padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
-  background: var(--bg);
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  padding-top: calc(0.625rem + env(safe-area-inset-top, 0px));
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--line);
 }
 
 .brand-wrap {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Chip AI credits trên thanh đầu trang: còn bao nhiêu, hết thì hiện thời gian chờ */
+.credit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.3125rem 0.75rem 0.3125rem 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--hl-ink);
+  text-decoration: none;
+  background: var(--hl);
+  border-radius: 999px;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s;
+}
+
+.credit-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 12px -6px color-mix(in srgb, var(--hl) 90%, #000);
+}
+
+.credit-chip.is-low {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.credit-chip.is-empty {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
 .shell-main {
@@ -273,10 +434,34 @@ a.btn {
   width: 100%;
   max-width: 640px;
   margin: 0 auto;
-  padding: 1.5rem 1rem calc(6rem + env(safe-area-inset-bottom, 0px));
+  padding: 1.5rem 1rem calc(6.5rem + env(safe-area-inset-bottom, 0px));
   display: grid;
   gap: 1.25rem;
   align-content: start;
+}
+
+/* Mỗi lần đổi trang, các khối nối nhau hiện lên nhẹ nhàng */
+.shell-main > * {
+  animation: rise 0.55s var(--ease) both;
+}
+
+.shell-main > :nth-child(2) {
+  animation-delay: 0.05s;
+}
+.shell-main > :nth-child(3) {
+  animation-delay: 0.1s;
+}
+.shell-main > :nth-child(4) {
+  animation-delay: 0.15s;
+}
+.shell-main > :nth-child(5) {
+  animation-delay: 0.2s;
+}
+.shell-main > :nth-child(6) {
+  animation-delay: 0.25s;
+}
+.shell-main > :nth-child(n + 7) {
+  animation-delay: 0.3s;
 }
 
 .bottom-nav {
@@ -288,7 +473,9 @@ a.btn {
   display: flex;
   justify-content: center;
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  backdrop-filter: saturate(1.4) blur(12px);
   border-top: 1px solid var(--line);
 }
 
@@ -299,7 +486,7 @@ a.btn {
   max-width: 640px;
 }
 
-/* Mục đang mở được đánh dấu bằng vạch màu nhấn phía trên, không dùng nền hình thuốc */
+/* Mục đang mở được đánh dấu bằng vệt dạ quang sau icon, giống tô bút trên trang vở */
 .nav-item {
   display: grid;
   justify-items: center;
@@ -311,19 +498,30 @@ a.btn {
   font-weight: 500;
   color: var(--muted);
   text-decoration: none;
-  border-top: 2px solid transparent;
-  margin-top: -1px;
+  transition: color 0.2s;
 }
 
 .nav-icon {
   display: grid;
   place-items: center;
+  width: 3.25rem;
+  height: 1.875rem;
+  border-radius: 999px;
+  transition: background-color 0.3s var(--ease), color 0.3s, transform 0.3s var(--ease);
+}
+
+.nav-item:hover .nav-icon {
+  transform: translateY(-1px);
 }
 
 .nav-item[aria-current='page'] {
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 600;
-  border-top-color: var(--accent);
+}
+
+.nav-item[aria-current='page'] .nav-icon {
+  color: var(--hl-ink);
+  background: var(--hl);
 }
 
 /* ---------- Trang chủ ---------- */
@@ -332,14 +530,17 @@ a.btn {
   gap: 0.25rem;
 }
 
-/* Khối "Tiếp tục học": nổi bật nhất trang, không viền, nền khác màu */
+/* Khối "Tiếp tục học": một trang vở có lề đỏ và dòng kẻ, nổi bật nhất trang */
 .hero {
   display: grid;
   gap: 0.75rem;
-  padding: 1.5rem 1.25rem;
-  background: var(--surface-2);
-  border-left: 4px solid var(--accent);
-  border-radius: var(--radius-sm);
+  padding: 1.5rem 1.25rem 1.5rem 3.25rem;
+  background-color: var(--surface);
+  background-image: linear-gradient(90deg, transparent 2.25rem, var(--margin) 2.25rem, var(--margin) calc(2.25rem + 2px), transparent calc(2.25rem + 2px)),
+    repeating-linear-gradient(transparent 0 1.7rem, var(--rule) 1.7rem 1.75rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 .hero-label {
@@ -360,7 +561,199 @@ a.btn {
   justify-self: start;
 }
 
-/* Danh sách lối tắt: các dòng cách nhau bằng đường kẻ, không dùng thẻ */
+/* Thẻ AI credits (components/CreditMeter.jsx) */
+.credit-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.125rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.credit-card.is-compact {
+  padding: 0.875rem 1rem;
+  background: var(--surface-2);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.credit-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.credit-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--hl-ink);
+  background: var(--hl);
+  border-radius: 12px;
+}
+
+.is-compact .credit-icon {
+  width: 2.125rem;
+  height: 2.125rem;
+  border-radius: 10px;
+}
+
+.credit-title {
+  min-width: 0;
+}
+
+.credit-label {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.credit-num {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-compact .credit-num {
+  font-size: 1.25rem;
+}
+
+.credit-num strong {
+  font-weight: 700;
+}
+
+.credit-num span {
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.credit-note {
+  margin: 0 0 0 auto;
+  font-size: 0.75rem;
+  text-align: right;
+  color: var(--muted);
+}
+
+/* Thanh credits còn lại: vạch chéo như nét tô bút */
+.meter {
+  height: 0.625rem;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.is-compact .meter {
+  background: var(--surface);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background-color: var(--accent);
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0 6px, transparent 6px 12px);
+  border-radius: inherit;
+  transition: width 0.9s var(--ease), background-color 0.3s;
+}
+
+.credit-reset {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.credit-card.is-low .meter > span {
+  background-color: var(--amber);
+}
+
+.credit-card.is-low .credit-reset {
+  font-weight: 600;
+  color: var(--warn-ink);
+}
+
+/* Hết credits: cả thẻ đổi sang tông đỏ nhạt, hiện rõ phải chờ bao lâu */
+.credit-card.is-empty {
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.credit-card.is-empty .credit-icon {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+}
+
+.credit-wait {
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface);
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: var(--radius-sm);
+}
+
+.credit-wait p {
+  margin: 0;
+}
+
+.credit-wait-title {
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.credit-wait-text {
+  font-size: 0.9375rem;
+}
+
+.count {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Khung chờ khi đang tải dữ liệu: nhẹ và đỡ giật hơn dòng chữ "Đang tải..." */
+.skeleton {
+  display: block;
+  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in srgb, var(--surface-2) 45%, var(--surface)) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-line {
+  height: 0.875rem;
+  width: 100%;
+}
+
+.skeleton-line.short {
+  width: 35%;
+}
+
+.skeleton-title {
+  height: 1.5rem;
+  width: 70%;
+}
+
+.skeleton-bar {
+  height: 0.625rem;
+  border-radius: 999px;
+}
+
+/* Danh sách lối tắt đánh số như mục lục vở: các dòng cách nhau bằng đường kẻ, không dùng thẻ */
 .rows {
   margin: 0;
   padding: 0;
@@ -370,22 +763,46 @@ a.btn {
 
 .row-link {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 0.25rem;
+  gap: 0.875rem;
+  padding: 1rem 0.5rem;
   color: inherit;
   text-decoration: none;
   border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.25s, padding-left 0.3s var(--ease);
+}
+
+.row-link:hover {
+  padding-left: 0.875rem;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 
 .row-link:hover h3 {
   color: var(--accent);
 }
 
+.row-num {
+  min-width: 1.75rem;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  opacity: 0.55;
+  transition: color 0.25s, opacity 0.25s;
+}
+
+.row-link:hover .row-num {
+  color: var(--accent);
+  opacity: 1;
+}
+
 .row-link h3 {
   font-family: var(--font-display);
   font-size: 1.0625rem;
+  transition: color 0.2s;
 }
 
 .row-link p {
@@ -396,6 +813,12 @@ a.btn {
 
 .tile-arrow {
   color: var(--muted);
+  transition: transform 0.3s var(--ease), color 0.2s;
+}
+
+.row-link:hover .tile-arrow {
+  color: var(--accent);
+  transform: translateX(3px);
 }
 
 /* Icon ở trạng thái trống: chỉ có nét vẽ màu nhấn, không có ô nền */
@@ -434,6 +857,11 @@ select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+  transition: border-color 0.2s;
+}
+
+select:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
 
 select:focus-visible {
@@ -458,6 +886,11 @@ select:focus-visible {
   border: 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, transform 0.2s var(--ease);
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
 }
 
 .icon-btn[aria-pressed='true'] {
@@ -489,7 +922,8 @@ select:focus-visible {
   display: block;
   height: 100%;
   background: var(--accent);
-  transition: width 0.3s;
+  border-radius: inherit;
+  transition: width 0.4s var(--ease);
 }
 
 .doc-head,
@@ -516,7 +950,7 @@ select:focus-visible {
   color: var(--accent);
   background: var(--tint);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .doc-title {
@@ -549,11 +983,11 @@ select:focus-visible {
 }
 
 .chip {
-  padding: 0.125rem 0.5rem;
+  padding: 0.125rem 0.625rem;
   font-size: 0.75rem;
   color: var(--muted);
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: 999px;
 }
 
 .doc-actions {
@@ -587,12 +1021,10 @@ select:focus-visible {
 
 @media (min-width: 560px) {
   .hero {
-    padding: 1.75rem 1.5rem;
+    padding: 1.75rem 1.5rem 1.75rem 3.5rem;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
+  .page-login {
+    padding-top: 5rem;
   }
 }

@@ -1,12 +1,14 @@
-// Chức năng: trang Trang chủ - lời chào theo giờ, nhắc xác minh email, khối "Tiếp tục học" (tài liệu gần nhất), lối tắt, trạng thái hệ thống.
+// Chức năng: trang Trang chủ - lời chào theo giờ, nhắc xác minh email, khối "Tiếp tục học" (tài liệu gần nhất),
+// AI credits (kèm đếm ngược tới lúc làm mới), lối tắt đánh số như mục lục vở, trạng thái hệ thống.
 import { useEffect, useState } from 'react'
 import { getHealth, listDocuments } from '../services/api.js'
 import Icon from '../components/Icon.jsx'
+import CreditCard from '../components/CreditMeter.jsx'
 
 const LINKS = [
   { href: '#/documents', title: 'Tài liệu', text: 'Tải tài liệu lên để tạo câu hỏi.' },
   { href: '#/questions', title: 'Câu hỏi', text: 'Tạo và duyệt câu hỏi từ tài liệu.' },
-  { href: '#/quiz', title: 'Quiz & phòng', text: 'Tạo bài, mở phòng cho cả lớp.' },
+  { href: '#/quiz', title: 'Quiz & phòng', text: 'Tạo bài, mở phòng cho cả lớp.', soon: true },
   { href: '#/settings', title: 'Cài đặt', text: 'Giao diện, hồ sơ, tài khoản.' },
 ]
 
@@ -16,6 +18,13 @@ function greetingText() {
   if (hour < 13) return 'Chào buổi trưa'
   if (hour < 18) return 'Chào buổi chiều'
   return 'Chào buổi tối'
+}
+
+// Tên gọi ngắn gọn: lấy từ cuối của tên hiển thị ("Nguyễn Văn An" -> "An"); chưa có tên thì dùng phần trước @ của email
+function shortName(profile, user) {
+  const name = profile?.displayName?.trim()
+  if (name) return name.split(/\s+/).pop()
+  return (user.email || '').split('@')[0]
 }
 
 export default function Dashboard({ user, profile, profileError, emailVerified, onResend, onCheckVerified, verifyMsg, getToken }) {
@@ -48,7 +57,7 @@ export default function Dashboard({ user, profile, profileError, emailVerified, 
     <>
       <section className="greeting">
         <h1>
-          {greetingText()}, {profile?.displayName || user.email}.
+          {greetingText()}, <mark>{shortName(profile, user)}</mark>.
         </h1>
         <p className="hint">Hôm nay bạn muốn học gì?</p>
       </section>
@@ -80,7 +89,13 @@ export default function Dashboard({ user, profile, profileError, emailVerified, 
         </section>
       )}
 
-      {docs !== null && (
+      {docs === null ? (
+        <section className="hero" aria-hidden="true">
+          <span className="skeleton skeleton-line short" />
+          <span className="skeleton skeleton-title" />
+          <span className="skeleton skeleton-line" />
+        </section>
+      ) : (
         <section className="hero" aria-label="Tiếp tục học">
           {recent ? (
             <>
@@ -107,12 +122,20 @@ export default function Dashboard({ user, profile, profileError, emailVerified, 
         </section>
       )}
 
+      <CreditCard />
+
       <ul className="rows" aria-label="Chức năng">
-        {LINKS.map((link) => (
+        {LINKS.map((link, i) => (
           <li key={link.href}>
             <a className="row-link" href={link.href}>
+              <span className="row-num" aria-hidden="true">
+                {String(i + 1).padStart(2, '0')}
+              </span>
               <div>
-                <h3>{link.title}</h3>
+                <h3>
+                  {link.title}
+                  {link.soon && <span className="badge badge-soon">Sắp có</span>}
+                </h3>
                 <p>{link.text}</p>
               </div>
               <span className="tile-arrow">

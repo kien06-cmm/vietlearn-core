@@ -77,6 +77,22 @@ const PATHS = {
       <path d="M6 12v5c3 3 9 3 12 0v-5" />
     </>
   ),
+  spark: <path d="M13 2 4 14h7l-1 8 9-12h-7z" />,
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </>
+  ),
+  check: <path d="M20 6 9 17l-5-5" />,
+  refresh: (
+    <>
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+      <path d="M3 21v-5h5" />
+    </>
+  ),
 }
 
 export default function Icon({ name, size = 24 }) {

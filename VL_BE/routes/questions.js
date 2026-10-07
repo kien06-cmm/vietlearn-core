@@ -7,7 +7,7 @@ import { getDb } from '../firebase.js';
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, getBalance, reserveCredits } from '../credits.js';
+import { QuotaError, currentPeriod, getBalance, periodEnd, reserveCredits } from '../credits.js';
 import { QUESTION_TYPES, parseQuestion, splitForStorage } from '../ai/questionRules.js';
 import { wakeWorker } from '../worker/index.js';
 
@@ -18,8 +18,8 @@ const MAX_ACTIVE_JOBS = 2; // mỗi người tối đa 2 job sinh câu hỏi ch�
 const questions = () => getDb().collection('questions');
 const answerKeys = () => getDb().collection('answerKeys');
 
-function fail(res, status, message, code) {
-    return res.status(status).json({ status: 'error', message, ...(code ? { code } : {}) });
+function fail(res, status, message, code, extra) {
+    return res.status(status).json({ status: 'error', message, ...(code ? { code } : {}), ...(extra || {}) });
 }
 
 const iso = (ts) => (ts?.toDate ? ts.toDate().toISOString() : null);
@@ -145,7 +145,7 @@ router.post('/generate', generateLimiter, userOnly, async (req, res) => {
                 })
         });
     } catch (err) {
-        if (err instanceof QuotaError) return fail(res, 402, err.message, 'quota-credits');
+        if (err instanceof QuotaError) return fail(res, 402, err.message, 'quota-credits', { resetsAt: periodEnd(period) });
         throw err;
     }
 

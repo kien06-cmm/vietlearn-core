@@ -4,8 +4,11 @@ import { useAuth } from './hooks/useAuth.js'
 import { useProfile } from './hooks/useProfile.js'
 import { useHashRoute } from './hooks/useHashRoute.js'
 import { trackEvent } from './services/api.js'
+import { CreditsProvider } from './hooks/useCredits.jsx'
 import LoginForm from './components/LoginForm.jsx'
 import AppShell from './components/AppShell.jsx'
+import BrandMark from './components/BrandMark.jsx'
+import Icon from './components/Icon.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Settings from './pages/Settings.jsx'
 import Documents from './pages/Documents.jsx'
@@ -71,11 +74,34 @@ function App() {
 
   if (!user) {
     return (
-      <main className="page">
+      <main className="page page-login">
         <div className="login-hero">
-          <img className="login-logo" src="/logo.png" alt="VietLearn" />
-          <h1>Học nhanh hơn, ôn đúng chỗ yếu.</h1>
-          <p className="hint">Đăng nhập hoặc tạo tài khoản để bắt đầu.</p>
+          <div className="login-brand">
+            <BrandMark size={44} />
+            <span className="wordmark wordmark-lg">
+              Viet<span>Learn</span>
+            </span>
+          </div>
+          <h1>
+            Học nhanh hơn, <mark>ôn đúng chỗ yếu.</mark>
+          </h1>
+          <p className="lead">
+            Tải tài liệu lên, AI soạn câu hỏi có dẫn nguồn từng trang. Bạn chỉ cần đọc, duyệt và ôn.
+          </p>
+          <ul className="login-points" aria-label="VietLearn làm được gì">
+            <li>
+              <Icon name="upload" size={18} />
+              Tải PDF, DOCX, TXT
+            </li>
+            <li>
+              <Icon name="spark" size={18} />
+              AI soạn câu hỏi
+            </li>
+            <li>
+              <Icon name="search" size={18} />
+              Xem nguồn từng câu
+            </li>
+          </ul>
         </div>
         <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
       </main>
@@ -99,7 +125,8 @@ function App() {
   }
 
   return (
-    <AppShell route={route} planLabel={profile?.plan}>
+    <CreditsProvider user={user} getToken={getToken}>
+      <AppShell route={route} planLabel={profile?.plan}>
       {route === 'home' && (
         <Dashboard
           user={user}
@@ -131,6 +158,7 @@ function App() {
           <p className="hint">Đang tải hồ sơ...</p>
         ))}
     </AppShell>
+    </CreditsProvider>
   )
 }
 
