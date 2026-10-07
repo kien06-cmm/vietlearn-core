@@ -28,7 +28,7 @@ function parseJson(text) {
 async function gemini({ system, prompt, temperature, maxOutputTokens }) {
     const key = process.env.AI_API_KEY;
     if (!key) throw new AIError('Thiếu biến môi trường AI_API_KEY', { code: 'ai-no-key' });
-    const model = process.env.AI_MODEL || 'gemini-2.5-flash-lite';
+    const model = process.env.AI_MODEL || 'gemini-3.5-flash-lite';
 
     const body = {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],

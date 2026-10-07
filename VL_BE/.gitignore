@@ -3,3 +3,7 @@ node_modules/
 *.log
 serviceAccount*.json
 *-firebase-adminsdk-*.json
+
+# Kết quả đánh giá AI và tài liệu thử (có thể chứa nội dung riêng tư)
+reports/
+eval-docs/
