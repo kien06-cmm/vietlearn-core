@@ -69,10 +69,20 @@ Quy tắc: mọi phase đều deploy lên staging trước. Chưa public khi ch�
 - Log có cấu trúc, theo dõi lỗi bằng Sentry hoặc tương đương.
 - Bộ sự kiện analytics đầu tiên: `visit`, `register`.
 
-## 8. Việc chưa chốt
+## 8. Realtime phòng làm bài (Phase 4)
+
+- WebSocket tại `/ws`, chạy chung cổng với API (`realtime/wsServer.js`). Client mở kết nối rồi gửi ngay `{ type: 'auth', auth, code }` (`Bearer <token>` hoặc `Guest <token>`), vì trình duyệt không gắn được header cho WebSocket. Server kiểm tra token và vai trò trong phòng (chủ phòng hay người đã vào) rồi trả `{ type: 'ready', role }`.
+- Chỉ đẩy **thay đổi**: phòng đổi trạng thái/số người (gửi cả chủ phòng và người tham gia), người tham gia đổi tiến độ (chỉ gửi chủ phòng). Dữ liệu gốc vẫn ở Firestore và lấy bằng REST. WebSocket không nối được thì giao diện tự quay về hỏi định kỳ (3 giây; thưa hơn, 20-30 giây, khi đang nối để đồng bộ lại).
+- Giới hạn: 2000 kết nối/instance, 400 kết nối/phòng, 20 tin/10 giây mỗi kết nối, tin tối đa 2 KB, ping mỗi 30 giây để dọn kết nối chết. Mã đóng 4001 xác thực lỗi, 4003 sai nguồn (origin), 4004 không có phòng hoặc chưa vào phòng, 4008 quá tải; client không tự nối lại với mã 4xxx.
+- **Chỉ chạy MỘT instance API** trên Render: hub nằm trong bộ nhớ của tiến trình (`realtime/roomHub.js`). Muốn chạy nhiều instance thì cần thêm kênh chung (Redis pub/sub). Không ảnh hưởng tính đúng đắn: chấm bài, chuyển trạng thái phòng đều làm qua REST + transaction.
+- Chấm bài ở server; đáp án đúng (`quizVersionKeys`) chỉ được đọc khi chấm hoặc xem lại SAU khi đã nộp. Đề gửi xuống chỉ có id, loại, đề bài, đáp án (mỗi đáp án mang index gốc, không tiết lộ đáp án đúng).
+- Rate limit: toàn API 120 request/phút/IP, riêng `/attempts` và `/rooms` rộng theo IP (cả lớp thường chung Wi-Fi) nhưng chặt theo từng người.
+
+## 9. Việc chưa chốt
 
 - [ ] Tách production (Firebase project + Render service + Vercel).
 - [ ] Biến `DATABASE_URL` trên Render: giữ hay bỏ (liên quan Postgres).
 - [ ] Domain riêng cho frontend và API.
 - [ ] Chọn nhà cung cấp AI và lớp trừu tượng (Phase 3).
 - [ ] Hàng đợi: Redis (BullMQ) hay cách khác.
+- [ ] Realtime nhiều instance: cần Redis pub/sub nếu vượt một instance (V1 chạy một instance là đủ).

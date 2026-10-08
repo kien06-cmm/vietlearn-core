@@ -6,11 +6,12 @@ import Icon from '../components/Icon.jsx'
 import QuizEditor from '../components/QuizEditor.jsx'
 import QuizVersions from '../components/QuizVersions.jsx'
 import AttemptRunner from '../components/AttemptRunner.jsx'
+import RoomHost from '../components/RoomHost.jsx'
 import './Questions.css'
 import './Quizzes.css'
 
 // Danh sách quiz
-function QuizList({ getToken, onCreate, onEdit, onVersions, onTake }) {
+function QuizList({ getToken, onCreate, onEdit, onVersions, onTake, onRoom }) {
   const [quizzes, setQuizzes] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -72,6 +73,9 @@ function QuizList({ getToken, onCreate, onEdit, onVersions, onTake }) {
           <Icon name="target" size={20} />
           Tạo quiz mới
         </button>
+        <a className="btn btn-secondary" href="#/join">
+          Vào phòng bằng mã
+        </a>
       </section>
 
       {error && (
@@ -122,7 +126,12 @@ function QuizList({ getToken, onCreate, onEdit, onVersions, onTake }) {
                   Sửa
                 </button>
                 {q.currentVersion > 0 && (
-                  <button className="btn btn-primary" disabled={busy} onClick={() => onTake(q)}>
+                  <button className="btn btn-primary" disabled={busy} onClick={() => onRoom(q)}>
+                    Mở phòng
+                  </button>
+                )}
+                {q.currentVersion > 0 && (
+                  <button className="btn btn-secondary" disabled={busy} onClick={() => onTake(q)}>
                     Làm thử
                   </button>
                 )}
@@ -150,6 +159,10 @@ export default function Quizzes({ getToken }) {
   // view: { name: 'list' } | { name: 'edit', id? } (id rỗng = tạo mới) | { name: 'versions', quiz } | { name: 'attempt', quiz, run }
   const [view, setView] = useState({ name: 'list' })
   const toList = () => setView({ name: 'list' })
+
+  if (view.name === 'room') {
+    return <RoomHost key={view.quiz.id} getToken={getToken} quiz={view.quiz} onBack={toList} />
+  }
 
   if (view.name === 'attempt') {
     return (
@@ -183,6 +196,7 @@ export default function Quizzes({ getToken }) {
       onEdit={(id) => setView({ name: 'edit', id })}
       onVersions={(quiz) => setView({ name: 'versions', quiz })}
       onTake={(quiz) => setView({ name: 'attempt', quiz, run: 1 })}
+      onRoom={(quiz) => setView({ name: 'room', quiz })}
     />
   )
 }

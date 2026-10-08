@@ -67,6 +67,27 @@ export function buildAttemptView(questions, settings, seed) {
 }
 
 // ---------------------------------------------------------------------------
+// Chế độ nhanh (khởi động, exit ticket): mỗi lượt làm chỉ gồm một phần câu hỏi của version.
+// Tập câu chọn theo seed của lượt làm (mỗi người một tập khác nhau) và lưu lại id để chấm/xem lại đúng tập đó.
+// ---------------------------------------------------------------------------
+
+// Trả mảng id đã chọn, hoặc null nếu dùng đủ tất cả câu
+export function pickQuestionIds(questions, count, seed) {
+    if (!Number.isInteger(count) || count < 1 || count >= questions.length) return null;
+    return seededShuffle(
+        questions.map((q) => q.id),
+        deriveSeed(seed, 'pick')
+    ).slice(0, count);
+}
+
+// Giữ nguyên thứ tự gốc của version; thứ tự hiển thị do arrange() quyết định theo seed
+export function questionsForAttempt(questions, ids) {
+    if (!ids) return questions;
+    const set = new Set(ids);
+    return questions.filter((q) => set.has(q.id));
+}
+
+// ---------------------------------------------------------------------------
 // Kiểm tra dạng câu trả lời người làm gửi lên
 // Dạng: single = số (index gốc) · multi = mảng số · truefalse = true (Đúng) / false (Sai) · fill, short = chuỗi · null = xóa câu trả lời
 // ---------------------------------------------------------------------------

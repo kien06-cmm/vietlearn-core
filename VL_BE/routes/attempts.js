@@ -1,6 +1,6 @@
 // Chức năng: API làm bài (Phase 4) - mở lượt làm (seed + xáo trộn do server quyết định, giới hạn số lần, tiếp tục lượt đang dở), lưu nháp tự động, nộp bài (chấm ở server, nộp nhiều lần vẫn chỉ chấm một lần), xem lại kết quả, ghi sự kiện chống gian lận.
 // Đáp án đúng nằm ở quizVersionKeys và chỉ được đọc khi chấm hoặc khi xem lại SAU KHI đã nộp.
-// Hiện lượt làm do chủ quiz tự mở (làm thử). Phòng làm bài (bước sau) dùng lại openAttempt với roomId.
+// Lượt làm do chủ quiz tự mở (làm thử) hoặc do người trong phòng mở (POST /attempts/room, roomId = mã phòng). Phòng kết thúc thì các lượt đang dở trong phòng được nộp tự động.
 import { Router } from 'express';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -17,8 +17,12 @@ import {
     gradeAttempt,
     isPastDeadline,
     mergeAnswers,
-    newSeed
+    newSeed,
+    pickQuestionIds,
+    questionsForAttempt
 } from '../quiz/gradingRules.js';
+import { PROGRESS_IN_PROGRESS, isRoomEnded, normalizeCode, participantKey, progressOfSubmitted } from '../quiz/roomRules.js';
+import { hub, safePublish } from '../realtime/roomHub.js';
 
 const router = Router();
 const anyActor = requireRole(['user', 'guest']);
@@ -29,6 +33,7 @@ const counters = () => getDb().collection('attemptCounters');
 const quizzes = () => getDb().collection('quizzes');
 const versions = () => getDb().collection('quizVersions');
 const versionKeys = () => getDb().collection('quizVersionKeys');
+const rooms = () => getDb().collection('rooms');
 
 // Cả lớp thường chung một mạng Wi-Fi (cùng IP) nên giới hạn theo IP ở đây rộng; giới hạn chặt nằm ở từng người làm bài bên dưới
 router.use(rateLimit({ windowMs: 60_000, max: 1200, name: 'attempts-ip' }));
@@ -97,6 +102,9 @@ async function loadKeys(quizId, n) {
 // ---------------------------------------------------------------------------
 const isMine = (a, actor) => a.participant?.type === actor.type && a.participant?.id === actor.id;
 
+// Các câu hỏi của một lượt làm: đủ câu của version, hoặc chỉ tập đã chọn khi làm trong phòng chế độ nhanh (khởi động, exit ticket)
+const qsOf = (version, a) => questionsForAttempt(version.questions, a.questionIds);
+
 // Chỉ chính người làm mới thấy lượt làm của mình. Không phải của mình thì trả 404 (không tiết lộ lượt làm có tồn tại)
 async function loadMine(req) {
     const id = req.params.id;
@@ -126,11 +134,33 @@ function toPublicAttempt(id, a) {
 
 const deadlineOf = (a) => millisOf(a.deadlineAt);
 
+// Trạng thái phòng được nhớ vài giây để mỗi lần lưu nháp không tốn thêm một lượt đọc Firestore
+const roomEndedCache = new Map(); // code -> { ended, at }
+const ROOM_CACHE_MS = 2000;
+
+async function roomEnded(code) {
+    const hit = roomEndedCache.get(code);
+    if (hit && Date.now() - hit.at < ROOM_CACHE_MS) return hit.ended;
+    const snap = await rooms().doc(code).get();
+    const ended = !snap.exists || isRoomEnded(snap.data(), Date.now());
+    roomEndedCache.set(code, { ended, at: Date.now() });
+    if (roomEndedCache.size > 200) roomEndedCache.delete(roomEndedCache.keys().next().value);
+    return ended;
+}
+
+// Lượt làm thuộc phòng đã kết thúc mà chưa nộp: nộp tự động theo bản đã lưu. Trả về dữ liệu lượt làm mới nhất.
+async function settleRoom(id, a) {
+    if (a.status === 'in_progress' && a.roomId && (await roomEnded(a.roomId))) {
+        return (await finalizeAttempt(id, { reason: 'room-ended' })).attempt;
+    }
+    return a;
+}
+
 // ---------------------------------------------------------------------------
 // Chốt bài và chấm điểm. Chạy trong transaction nên nộp nhiều lần/ nộp song song vẫn chỉ chấm đúng một lần.
 // patch: câu trả lời cuối cùng đã làm sạch (bỏ qua nếu đã quá hạn: khi đó chấm theo bản đã lưu).
 // ---------------------------------------------------------------------------
-async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' } = {}) {
+export async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' } = {}) {
     const ref = attempts().doc(attemptId);
     const pre = await ref.get();
     if (!pre.exists) throw new AttemptError(404, 'Không tìm thấy lượt làm bài');
@@ -140,8 +170,11 @@ async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' }
     // Version và đáp án bất biến nên đọc trước transaction an toàn
     const [version, keys] = await Promise.all([loadVersion(a0.quizId, a0.quizVersion), loadKeys(a0.quizId, a0.quizVersion)]);
     const counterRef = counters().doc(a0.counterId);
+    // Tiến độ lưu sẵn trên bản ghi tham gia của phòng để chủ phòng không phải đọc từng lượt làm
+    const pKey = `${a0.participant?.type}_${a0.participant?.id}`;
+    const pRef = a0.roomId ? rooms().doc(a0.roomId).collection('participants').doc(pKey) : null;
 
-    return getDb().runTransaction(async (tx) => {
+    const out = await getDb().runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const a = snap.data();
         if (a.status === 'submitted') return { already: true, attempt: a };
@@ -149,15 +182,24 @@ async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' }
         const nowMs = Date.now();
         const late = isPastDeadline(deadlineOf(a), nowMs);
         const answers = patch && !late ? mergeAnswers(a.answers, patch) : a.answers || {};
-        const result = gradeAttempt(version.questions, keys, answers);
+        const result = gradeAttempt(qsOf(version, a), keys, answers);
         const submitReason = late ? 'timeout' : reason;
         const submittedAt = new Date(nowMs);
 
         tx.update(ref, { status: 'submitted', answers, result, submittedAt, submitReason, updatedAt: FieldValue.serverTimestamp() });
         // Giải phóng "lượt đang làm" để người làm có thể mở lượt mới (nếu còn số lần)
         tx.set(counterRef, { activeAttemptId: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        if (pRef) tx.set(pRef, { attemptId, ...progressOfSubmitted(result, submitReason) }, { merge: true });
         return { already: false, attempt: { ...a, status: 'submitted', answers, result, submittedAt, submitReason } };
     });
+
+    // Chủ phòng thấy điểm ngay khi có người nộp (đẩy sau khi đã lưu xong; lỗi đẩy tin không ảnh hưởng việc chấm)
+    if (!out.already && pRef) {
+        safePublish(() =>
+            hub.publishParticipant(a0.roomId, { key: pKey, ...progressOfSubmitted(out.attempt.result, out.attempt.submitReason) })
+        );
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,10 +208,11 @@ async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' }
 //  - tiếp tục lượt đang dở thay vì tạo lượt mới (mất mạng, tải lại trang)
 // Trả { createdId } hoặc { resumedId }.
 // ---------------------------------------------------------------------------
-async function openAttempt({ actor, quizId, versionNumber, roomId = null }) {
+async function openAttempt({ actor, quizId, versionNumber, roomId = null, overrides = null }) {
     const version = await loadVersion(quizId, versionNumber);
     const maxAttempts = version.settings?.maxAttempts ?? null;
-    const counterId = `${actor.type}_${actor.id}__${quizId}`;
+    // Trong phòng, số lần làm tính riêng cho từng phòng (làm ở phòng cũ không chặn phòng mới)
+    const counterId = roomId ? `${actor.type}_${actor.id}__${quizId}__${roomId}` : `${actor.type}_${actor.id}__${quizId}`;
     const counterRef = counters().doc(counterId);
 
     for (let round = 0; round < 2; round++) {
@@ -191,7 +234,10 @@ async function openAttempt({ actor, quizId, versionNumber, roomId = null }) {
 
             const ref = attempts().doc();
             const nowMs = Date.now();
-            const deadlineMs = computeDeadline(nowMs, version.settings?.timeLimitMinutes ?? null);
+            // Trong phòng, thời gian và số câu do phòng quyết định (chế độ nhanh ghi đè cài đặt của quiz)
+            const timeLimit = overrides ? (overrides.timeLimitMinutes ?? null) : (version.settings?.timeLimitMinutes ?? null);
+            const seed = newSeed();
+            const deadlineMs = computeDeadline(nowMs, timeLimit);
             tx.set(ref, {
                 quizId,
                 quizVersion: versionNumber,
@@ -205,11 +251,12 @@ async function openAttempt({ actor, quizId, versionNumber, roomId = null }) {
                 participantKey: `${actor.type}:${actor.id}`,
                 counterId,
                 roomId,
-                seed: newSeed(),
+                seed,
+                questionIds: pickQuestionIds(version.questions, overrides?.questionLimit ?? null, seed),
                 status: 'in_progress',
                 answers: {},
                 events: [],
-                timeLimitMinutes: version.settings?.timeLimitMinutes ?? null,
+                timeLimitMinutes: timeLimit,
                 startedAt: new Date(nowMs),
                 deadlineAt: deadlineMs == null ? null : new Date(deadlineMs),
                 savedAt: null,
@@ -245,7 +292,7 @@ async function sendAttempt(res, snapId, a, httpStatus = 200, extra = {}) {
     let questions = null;
     if (a.status === 'in_progress') {
         const version = await loadVersion(a.quizId, a.quizVersion);
-        questions = buildAttemptView(version.questions, version.settings, a.seed);
+        questions = buildAttemptView(qsOf(version, a), version.settings, a.seed);
     }
     res.status(httpStatus).json({
         status: 'success',
@@ -305,6 +352,48 @@ router.post(
     })
 );
 
+const roomStartSchema = z.object({ code: z.string().min(1).max(20) }).strict();
+
+// ---------------------------------------------------------------------------
+// Bắt đầu làm bài trong phòng. Chỉ người đã vào phòng (user hoặc khách) và phòng đang RUNNING.
+// Làm đúng version mà phòng đã chốt; mất mạng/tải lại thì tiếp tục lượt đang dở.
+// ---------------------------------------------------------------------------
+router.post(
+    '/room',
+    anyActor,
+    actorLimit('attempts-room-start', 20),
+    handle(async (req, res) => {
+        const parsed = roomStartSchema.safeParse(req.body);
+        if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+        const code = normalizeCode(parsed.data.code);
+        if (!code) return fail(res, 404, 'Không tìm thấy phòng');
+
+        const roomRef = rooms().doc(code);
+        const [roomSnap, pSnap] = await Promise.all([roomRef.get(), roomRef.collection('participants').doc(participantKey(req.actor)).get()]);
+        if (!roomSnap.exists) return fail(res, 404, 'Không tìm thấy phòng');
+        if (!pSnap.exists) return fail(res, 403, 'Bạn chưa vào phòng này', 'not-in-room');
+
+        const room = roomSnap.data();
+        if (isRoomEnded(room, Date.now())) return fail(res, 409, 'Phòng đã kết thúc', 'room-ended');
+        if (room.status !== 'RUNNING') return fail(res, 409, 'Phòng chưa bắt đầu', 'room-not-started');
+
+        const out = await openAttempt({
+            actor: req.actor,
+            quizId: room.quizId,
+            versionNumber: room.quizVersion,
+            roomId: code,
+            overrides: { timeLimitMinutes: room.timeLimitMinutes ?? null, questionLimit: room.questionLimit ?? null }
+        });
+        const id = out.createdId || out.resumedId;
+        if (pSnap.data().attemptId !== id) {
+            await pSnap.ref.update({ attemptId: id, ...PROGRESS_IN_PROGRESS });
+            safePublish(() => hub.publishParticipant(code, { key: participantKey(req.actor), ...PROGRESS_IN_PROGRESS }));
+        }
+        const snap = await attempts().doc(id).get();
+        await sendAttempt(res, id, snap.data(), out.createdId ? 201 : 200, { resumed: Boolean(out.resumedId) });
+    })
+);
+
 // ---------------------------------------------------------------------------
 // Lịch sử lượt làm của tôi (tùy chọn lọc theo quizId)
 // ---------------------------------------------------------------------------
@@ -351,6 +440,7 @@ router.get(
         if (a.status === 'in_progress' && isPastDeadline(deadlineOf(a), Date.now())) {
             a = (await finalizeAttempt(snap.id, { reason: 'timeout' })).attempt;
         }
+        a = await settleRoom(snap.id, a);
         await sendAttempt(res, snap.id, a);
     })
 );
@@ -370,9 +460,13 @@ router.put(
         const a = snap.data();
         if (a.status !== 'in_progress') return fail(res, 409, 'Bài đã được nộp', 'already-submitted');
         if (isPastDeadline(deadlineOf(a), Date.now())) return respondTimeUp(res, snap.id);
+        if (a.roomId && (await roomEnded(a.roomId))) {
+            await finalizeAttempt(snap.id, { reason: 'room-ended' });
+            return fail(res, 409, 'Phòng đã kết thúc, bài của bạn đã được nộp', 'room-ended');
+        }
 
         const version = await loadVersion(a.quizId, a.quizVersion);
-        const { answers: patch, rejected } = cleanAnswers(version.questions, parsed.data.answers);
+        const { answers: patch, rejected } = cleanAnswers(qsOf(version, a), parsed.data.answers);
 
         const outcome = await getDb().runTransaction(async (tx) => {
             const fresh = await tx.get(snap.ref);
@@ -408,7 +502,7 @@ router.post(
         let patch = null;
         if (a.status === 'in_progress' && parsed.data.answers) {
             const version = await loadVersion(a.quizId, a.quizVersion);
-            patch = cleanAnswers(version.questions, parsed.data.answers).answers;
+            patch = cleanAnswers(qsOf(version, a), parsed.data.answers).answers;
         }
 
         const out = await finalizeAttempt(snap.id, { patch, reason: 'submitted' });
@@ -434,6 +528,7 @@ router.get(
         if (a.status === 'in_progress' && isPastDeadline(deadlineOf(a), Date.now())) {
             a = (await finalizeAttempt(snap.id, { reason: 'timeout' })).attempt;
         }
+        a = await settleRoom(snap.id, a);
         if (a.status !== 'submitted') return fail(res, 409, 'Nộp bài xong mới xem được đáp án', 'not-submitted');
 
         const [version, keys] = await Promise.all([loadVersion(a.quizId, a.quizVersion), loadKeys(a.quizId, a.quizVersion)]);
@@ -441,7 +536,7 @@ router.get(
             status: 'success',
             attempt: toPublicAttempt(snap.id, a),
             review: buildReview({
-                questions: version.questions,
+                questions: qsOf(version, a),
                 settings: version.settings,
                 seed: a.seed,
                 keys,

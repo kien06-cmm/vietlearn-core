@@ -68,7 +68,7 @@ function ReviewBody({ item }) {
   )
 }
 
-export default function AttemptResult({ res, onExit, onRetry }) {
+export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về danh sách quiz' }) {
   const [onlyMissed, setOnlyMissed] = useState(false)
   const { attempt, review } = res
   const r = attempt.result
@@ -79,7 +79,7 @@ export default function AttemptResult({ res, onExit, onRetry }) {
     <>
       <section>
         <button className="btn btn-secondary" onClick={onExit}>
-          <Icon name="back" size={18} /> Danh sách quiz
+          <Icon name="back" size={18} /> {exitLabel}
         </button>
         <h1>Kết quả</h1>
         <p className="hint">{attempt.title}</p>
@@ -105,6 +105,9 @@ export default function AttemptResult({ res, onExit, onRetry }) {
           {r.pending > 0 && <span className="chip">Tự đối chiếu {r.pending}</span>}
         </div>
         {attempt.submitReason === 'timeout' && <p className="msg-warn">Đã hết giờ nên bài được nộp tự động theo phần đã lưu.</p>}
+        {attempt.submitReason === 'room-ended' && (
+          <p className="msg-warn">Phòng đã kết thúc nên bài được nộp tự động theo phần đã lưu.</p>
+        )}
         {r.pending > 0 && <p className="hint">Câu trả lời ngắn không được tính vào điểm. Hãy đối chiếu với đáp án mẫu bên dưới.</p>}
         <div className="doc-actions">
           {onRetry && (
@@ -113,7 +116,7 @@ export default function AttemptResult({ res, onExit, onRetry }) {
             </button>
           )}
           <button className="btn btn-secondary" onClick={onExit}>
-            Về danh sách quiz
+            {exitLabel}
           </button>
         </div>
       </section>

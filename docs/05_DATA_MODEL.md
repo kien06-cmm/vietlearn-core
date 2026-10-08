@@ -74,14 +74,20 @@ Credits: `creditBalances/{uid}_{YYYY-MM}` (`used`, `reserved`) + sổ cái `cred
 `GET /questions/credits` · `POST /questions/generate` (202, giữ chỗ credits) · `GET /questions/jobs/:jobId` · `GET /questions?topicId&documentId&jobId&reviewStatus` · `GET/PATCH/DELETE /questions/:id` · `GET /questions/:id/source` (nút "Xem nguồn") · `POST /questions/:id/approve` · `POST /questions/approve-many`.
 Sửa tay một câu chạy lại đúng luật kiểm tra như câu AI sinh, rồi về `draft` để duyệt lại.
 
-## Phase 4 — Quiz, Phòng, Làm bài (phác thảo)
+## Phase 4 — Quiz, Phòng, Làm bài (đã làm)
 
 - `quizzes/{quizId}` (bản nháp: `title`, `description`, `questionIds[]`, `settings`, `currentVersion`, hash để biết có thay đổi chưa publish), `quizVersions/{quizId}_{n}` (bản chụp câu hỏi, **bất biến** sau publish) và `quizVersionKeys/{quizId}_{n}` (đáp án, chỉ backend đọc). Hỗ trợ fork. Đã làm.
-- `rooms/{roomId}`: `quizVersionId`, `hostId`, `code`, `status` (`WAITING` → `RUNNING` → `ENDED`), `maxParticipants`. Trạng thái do server quyết định.
+- `rooms/{code}` (mã phòng 6 ký tự chính là id document; bỏ I, L, O, 0, 1 cho dễ gõ trên điện thoại): `hostId`, `quizId`, `quizVersion` (chốt version mới nhất lúc tạo phòng), `title`, `mode` (`standard` | `warmup` | `exit`), `questionLimit?`, `questionCount`, `timeLimitMinutes?`, `maxParticipants` (mặc định 50, tối đa 200), `participantCount`, `status` (`WAITING` → `RUNNING` → `ENDED`, chuyển trong transaction), `startedAt`, `endedAt`, `expiresAt` (tự hết hạn sau 12 giờ, coi như `ENDED`), `createdAt`. Trạng thái do server quyết định. Mỗi chủ phòng tối đa 5 phòng chưa kết thúc.
+- `rooms/{code}/participants/{type_id}`: `type` (`user` | `guest`), `id`, `displayName`, `joinedAt`, `attemptId?`, và tiến độ lưu sẵn để chủ phòng chỉ tốn 1 lượt đọc mỗi người: `status` (`waiting` | `in_progress` | `submitted`), `correct`, `gradable`, `score10`, `submitReason`. Số người vào được đếm trong transaction nên không vượt `maxParticipants` dù nhiều người vào cùng lúc.
+- Chế độ nhanh: `warmup` (tối đa 5 câu, 5 phút) và `exit` (tối đa 3 câu, 3 phút) ghi đè số câu và thời gian của quiz. Mỗi người nhận một tập câu khác nhau chọn theo `seed`; `attempts.questionIds` lưu đúng tập đó để chấm và xem lại.
+- `guestSessions/{sha256(token)}`: `guestId`, `displayName`, `expiresAt` (12 giờ). Chỉ lưu bản băm của token. Khách làm bài với `participant.type = guest`; chuyển kết quả khách sang tài khoản làm ở Phase 5.
 - `attempts/{attemptId}` (đã làm cho làm bài một mình, phòng sẽ dùng lại): `quizId`, `quizVersion`, `participant` (`{ type: user|guest, id, displayName? }`), `participantKey`, `roomId?`, `seed` (server cấp, dựng lại đúng thứ tự câu/đáp án), `status` (`in_progress` → `submitted`), `answers`, `startedAt`, `deadlineAt` (server tính), `submittedAt`, `submitReason` (`submitted` | `timeout`), `result` (điểm + trạng thái từng câu), `events[]` (tab_hidden, tab_visible, window_blur, window_focus, copy, paste; tối đa 200).
-- `attemptCounters/{actorType_actorId__quizId}`: `count` (số lượt đã mở, để chặn quá `maxAttempts`), `activeAttemptId` (lượt đang làm dở, để tiếp tục thay vì tạo mới).
+- `attemptCounters/{actorType_actorId__quizId}` (trong phòng: `{actorType_actorId}__{quizId}__{code}`, số lần làm tính riêng từng phòng): `count` (số lượt đã mở, để chặn quá `maxAttempts`), `activeAttemptId` (lượt đang làm dở, để tiếp tục thay vì tạo mới).
 - Câu hỏi nào không tự chấm được (trả lời ngắn) thì không tính vào điểm; nhiều đáp án chấm đúng-đủ hoặc sai, không có điểm từng phần ở V1.
-- API: `POST /attempts` · `GET /attempts?quizId` · `GET /attempts/:id` · `PUT /attempts/:id/answers` · `POST /attempts/:id/submit` · `GET /attempts/:id/result` (chỉ sau khi nộp) · `POST /attempts/:id/events`.
+- API: `POST /attempts` · `GET /attempts?quizId` · `GET /attempts/:id` · `PUT /attempts/:id/answers` · `POST /attempts/:id/submit` · `GET /attempts/:id/result` (chỉ sau khi nộp) · `POST /attempts/:id/events` · `POST /attempts/room` (bắt đầu hoặc tiếp tục làm bài trong phòng đang `RUNNING`).
+- API quiz: `GET/POST /quizzes` · `GET/PATCH/DELETE /quizzes/:id` · `POST /quizzes/:id/publish` · `GET /quizzes/:id/versions[/:n]` · `POST /quizzes/:id/fork`.
+- API phòng: `POST /rooms` (tạo, chỉ chủ quiz) · `GET /rooms/mine` · `POST /rooms/join` (tài khoản hoặc khách) · `GET /rooms/:code` · `POST /rooms/:code/start` · `POST /rooms/:code/end` (kết thúc hoặc hủy; lượt làm đang dở được nộp tự động) · `POST /guest-sessions` (tạo phiên khách).
+- Realtime: `WebSocket /ws` (xem 09_ARCHITECTURE mục 8). Chỉ báo thay đổi (phòng đổi trạng thái, người tham gia đổi tiến độ); dữ liệu gốc vẫn lấy bằng REST.
 
 ## Phase 5 — Vòng lặp học tập (phác thảo)
 

@@ -1,7 +1,15 @@
 // Chức năng: màn làm bài trên điện thoại (Phase 4) - mở/tiếp tục lượt làm, đồng hồ đếm ngược theo giờ server, mỗi lần một câu, lưu nháp tự động (có thử lại khi mất mạng), nộp bài, tự nộp khi hết giờ, ghi nhận chuyển tab (có báo trước cho người làm).
 // Đáp án đúng không bao giờ nằm trong đề; chỉ lấy được sau khi nộp (AttemptResult).
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getAttemptResult, logAttemptEvent, saveAttemptAnswers, startAttempt, submitAttempt } from '../services/api.js'
+import {
+  getAttempt,
+  getAttemptResult,
+  logAttemptEvent,
+  saveAttemptAnswers,
+  startAttempt,
+  startRoomAttempt,
+  submitAttempt,
+} from '../services/api.js'
 import { settingsText } from '../services/quizText.js'
 import { LETTERS, formatClock, isAnswered, tfText, timeText } from '../services/attemptText.js'
 import Icon from './Icon.jsx'
@@ -87,7 +95,8 @@ function QuestionInput({ q, value, onChange }) {
   )
 }
 
-export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
+// roomCode: làm bài trong phòng (không có màn bắt đầu, vào bài ngay; phòng kết thúc thì server nộp bài giúp). getToken dùng được cho cả tài khoản và khách.
+export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetry, exitLabel, roomEnded = false, live = false }) {
   const [phase, setPhase] = useState('intro') // intro | starting | running | submitting | done
   const [error, setError] = useState('')
   const [session, setSession] = useState(null) // { attempt, questions, resumed }
@@ -117,7 +126,8 @@ export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
     setPhase('starting')
     setError('')
     try {
-      const res = await startAttempt(await getToken(), quiz.id)
+      const token = await getToken()
+      const res = roomCode ? await startRoomAttempt(token, roomCode) : await startAttempt(token, quiz.id)
       offsetRef.current = Date.parse(res.serverNow) - Date.now()
       const saved = res.attempt.answers || {}
       answersRef.current = { ...saved }
@@ -130,6 +140,11 @@ export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
       setPhase('intro')
     }
   }
+
+  // Trong phòng không có màn bắt đầu: vào bài ngay (server cho tiếp tục lượt đang dở nên gọi hai lần cũng an toàn)
+  useEffect(() => {
+    if (roomCode) handleStart()
+  }, [])
 
   // ---------- Lưu nháp ----------
   const flush = useCallback(async () => {
@@ -146,7 +161,7 @@ export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
       setSavedAt(new Date())
     } catch (err) {
       ids.forEach((id) => dirtyRef.current.add(id))
-      if (err.code === 'time-up' || err.code === 'already-submitted') {
+      if (err.code === 'time-up' || err.code === 'already-submitted' || err.code === 'room-ended') {
         finishRef.current?.()
       } else {
         setSaveState('error')
@@ -226,6 +241,24 @@ export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
     if (phase === 'running' && remainingMs != null && remainingMs <= 0 && !autoFailedRef.current) finish(true)
   }, [phase, remainingMs, finish])
 
+  // Trong phòng: phòng kết thúc thì nộp ngay (tin từ WebSocket); còn hỏi server định kỳ làm dự phòng, thưa hơn khi WebSocket đang nối
+  useEffect(() => {
+    if (roomEnded && phase === 'running') finishRef.current?.()
+  }, [roomEnded, phase])
+
+  useEffect(() => {
+    if (!roomCode || phase !== 'running' || !attemptId) return
+    const t = setInterval(async () => {
+      try {
+        const res = await getAttempt(await getToken(), attemptId)
+        if (res.attempt.status === 'submitted') finishRef.current?.()
+      } catch {
+        // mất mạng: lần sau thử lại
+      }
+    }, live ? 30000 : 5000)
+    return () => clearInterval(t)
+  }, [roomCode, phase, attemptId, getToken, live])
+
   // ---------- Ghi nhận chuyển tab (đã báo trước ở màn bắt đầu và dòng nhắc khi làm) ----------
   useEffect(() => {
     if (phase !== 'running' || !attemptId) return
@@ -270,7 +303,32 @@ export default function AttemptRunner({ getToken, quiz, onExit, onRetry }) {
 
   // ---------- Giao diện ----------
   if (phase === 'done' && result) {
-    return <AttemptResult res={result} onExit={onExit} onRetry={onRetry} />
+    return <AttemptResult res={result} onExit={onExit} onRetry={onRetry} exitLabel={exitLabel} />
+  }
+
+  if (roomCode && (phase === 'intro' || phase === 'starting')) {
+    if (!error) {
+      return (
+        <section className="card empty" aria-live="polite">
+          <h2>Đang vào bài...</h2>
+        </section>
+      )
+    }
+    return (
+      <section className="card">
+        <p className="msg msg-error" role="alert">
+          {error}
+        </p>
+        <div className="doc-actions">
+          <button className="btn btn-primary" onClick={handleStart}>
+            Thử lại
+          </button>
+          <button className="btn btn-secondary" onClick={onExit}>
+            {exitLabel || 'Về danh sách quiz'}
+          </button>
+        </div>
+      </section>
+    )
   }
 
   if (phase === 'intro' || phase === 'starting') {

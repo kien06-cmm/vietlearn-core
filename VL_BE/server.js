@@ -1,4 +1,4 @@
-// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), phiên khách /guest-sessions, ghi sự kiện analytics /events.
+// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), phiên khách /guest-sessions, ghi sự kiện analytics /events, và gắn các router: tài liệu, câu hỏi + AI, quiz, làm bài, phòng làm bài (kèm WebSocket realtime tại /ws).
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -16,7 +16,9 @@ import topicsRouter from './routes/topics.js';
 import questionsRouter from './routes/questions.js';
 import quizzesRouter from './routes/quizzes.js';
 import attemptsRouter from './routes/attempts.js';
+import roomsRouter from './routes/rooms.js';
 import { startWorker } from './worker/index.js';
+import { attachRealtime } from './realtime/wsServer.js';
 
 await initMonitoring();
 
@@ -40,8 +42,10 @@ app.use(express.json({ limit: '10kb' }));
 app.use(requestLogger);
 
 // Giới hạn chung cho toàn API: 120 request / phút / IP
-// Riêng /attempts có giới hạn riêng (theo người làm bài) vì cả lớp có thể dùng chung một IP
-app.use(rateLimit({ windowMs: 60_000, max: 120, name: 'global', skip: (req) => req.path.startsWith('/attempts') }));
+// Riêng /attempts và /rooms có giới hạn riêng (theo người dùng) vì cả lớp có thể dùng chung một IP
+app.use(
+    rateLimit({ windowMs: 60_000, max: 120, name: 'global', skip: (req) => req.path.startsWith('/attempts') || req.path.startsWith('/rooms') })
+);
 
 // ---------------------------------------------------------------------------
 // Health check
@@ -212,8 +216,8 @@ app.get(
 // ---------------------------------------------------------------------------
 const guestSchema = z.object({ displayName: z.string().trim().min(1).max(30) }).strict();
 
-// Chặt hơn giới hạn chung: 10 phiên khách / phút / IP để không bị tạo hàng loạt
-const guestLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'guest-sessions' });
+// Cả lớp thường chung một mạng Wi-Fi (cùng IP) vào phòng cùng lúc nên giới hạn theo IP phải đủ rộng; vẫn chặn việc tạo phiên hàng loạt
+const guestLimiter = rateLimit({ windowMs: 60_000, max: 60, name: 'guest-sessions' });
 
 // Tạo phiên khách. Token chỉ trả về lần này; client gửi lại bằng header "Authorization: Guest <token>"
 app.post('/guest-sessions', guestLimiter, async (req, res) => {
@@ -285,6 +289,8 @@ app.use('/questions', questionsRouter);
 app.use('/quizzes', quizzesRouter);
 // Làm bài + chấm điểm (Phase 4)
 app.use('/attempts', attemptsRouter);
+// Phòng làm bài: tạo phòng, vào bằng mã, bắt đầu/kết thúc (Phase 4)
+app.use('/rooms', roomsRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi
@@ -306,8 +312,11 @@ app.use((err, req, res, next) => {
     res.status(500).json({ status: 'error', message: 'Lỗi máy chủ' });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`Backend Server đang chạy tại cổng ${port}`);
     // Staging: worker chạy chung tiến trình với API. Khi tách Background Worker riêng, đặt RUN_WORKER=false
     if (process.env.RUN_WORKER !== 'false') startWorker();
 });
+
+// Realtime phòng làm bài: WebSocket tại /ws, cùng cổng với API (cần chạy MỘT instance, xem realtime/roomHub.js)
+attachRealtime(server);

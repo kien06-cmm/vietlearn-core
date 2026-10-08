@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from './hooks/useAuth.js'
 import { useProfile } from './hooks/useProfile.js'
-import { useHashRoute } from './hooks/useHashRoute.js'
+import { useHashRoute, readHashParam } from './hooks/useHashRoute.js'
 import { trackEvent } from './services/api.js'
 import { CreditsProvider } from './hooks/useCredits.jsx'
 import LoginForm from './components/LoginForm.jsx'
@@ -14,6 +14,7 @@ import Settings from './pages/Settings.jsx'
 import Documents from './pages/Documents.jsx'
 import Questions from './pages/Questions.jsx'
 import Quizzes from './pages/Quizzes.jsx'
+import RoomJoin from './components/RoomJoin.jsx'
 import './App.css'
 
 function App() {
@@ -33,6 +34,8 @@ function App() {
   const { profile, error: profileError, save } = useProfile(user, emailVerified, getToken)
   const route = useHashRoute()
   const [verifyMsg, setVerifyMsg] = useState('')
+  // Khách (chưa đăng nhập) vào phòng bằng mã: mở sẵn nếu địa chỉ là link phòng (#/join/MÃ)
+  const [guestOpen, setGuestOpen] = useState(route === 'join')
 
   // Ghi 1 sự kiện 'visit' cho mỗi phiên trình duyệt (không đếm lại khi tải lại trang)
   useEffect(() => {
@@ -72,6 +75,22 @@ function App() {
     )
   }
 
+  if (!user && guestOpen) {
+    return (
+      <main className="page page-guest">
+        <RoomJoin
+          isGuest
+          initialCode={readHashParam()}
+          backLabel="Đăng nhập tài khoản"
+          onBack={() => {
+            setGuestOpen(false)
+            window.history.replaceState(null, '', '#/home')
+          }}
+        />
+      </main>
+    )
+  }
+
   if (!user) {
     return (
       <main className="page page-login">
@@ -104,6 +123,9 @@ function App() {
           </ul>
         </div>
         <LoginForm onLogin={login} onRegister={handleRegister} onReset={resetPassword} />
+        <button className="btn btn-secondary" onClick={() => setGuestOpen(true)}>
+          Vào phòng bằng mã, không cần tài khoản
+        </button>
       </main>
     )
   }
@@ -143,6 +165,16 @@ function App() {
       {route === 'questions' && <Questions getToken={getToken} />}
       {route === 'quiz' && (
         <Quizzes getToken={getToken} />
+      )}
+      {route === 'join' && (
+        <RoomJoin
+          getToken={getToken}
+          initialCode={readHashParam()}
+          backLabel="Quiz"
+          onBack={() => {
+            window.location.hash = '#/quiz'
+          }}
+        />
       )}
       {route === 'settings' &&
         (profile ? (

@@ -1,10 +1,11 @@
 // Chức năng: các hàm gọi API backend trên Render (health, hồ sơ /me, tài liệu /documents, câu hỏi + AI /questions /topics, ghi sự kiện analytics).
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://vietlearn-core.onrender.com'
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://vietlearn-core.onrender.com'
 
 // Gửi request tới backend. body (nếu có) được gửi dạng JSON.
 async function request(path, { token, method = 'GET', body } = {}) {
   const headers = {}
-  if (token) headers.Authorization = `Bearer ${token}`
+  // Token khách có dạng 'Guest <token>' (gửi nguyên); token đăng nhập Firebase gửi kèm 'Bearer'
+  if (token) headers.Authorization = token.startsWith('Guest ') ? token : `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -283,6 +284,51 @@ export async function logAttemptEvent(token, id, type) {
   } catch {
     // ghi nhận là phụ, không làm gián đoạn bài làm
   }
+}
+
+// ---------- Phòng làm bài (Phase 4) ----------
+// Token dùng chung cho tài khoản và khách: khách truyền chuỗi 'Guest <token>' (xem request).
+
+// Tạo phiên khách (không cần tài khoản): -> { token, guest: { id, displayName, expiresAt } }. Token chỉ trả về lần này.
+export function createGuestSession(displayName) {
+  return request('/guest-sessions', { method: 'POST', body: { displayName } })
+}
+
+// Chủ quiz mở phòng từ quiz đã publish -> { room }. options: { maxParticipants?, mode?: 'standard' | 'warmup' | 'exit' }
+export function createRoom(token, quizId, options = {}) {
+  const body = { quizId }
+  if (options.maxParticipants) body.maxParticipants = options.maxParticipants
+  if (options.mode && options.mode !== 'standard') body.mode = options.mode
+  return request('/rooms', { token, method: 'POST', body })
+}
+
+// Các phòng của tôi (chủ phòng) -> { rooms }
+export function listMyRooms(token) {
+  return request('/rooms/mine', { token })
+}
+
+// Vào phòng bằng mã -> { room, rejoined, me: { displayName } }
+export function joinRoom(token, code) {
+  return request('/rooms/join', { token, method: 'POST', body: { code } })
+}
+
+// Trạng thái phòng (màn chờ hỏi định kỳ). Chủ phòng: { role: 'host', room, participants, counts }. Người tham gia: { role: 'participant', room, me }
+export function getRoom(token, code) {
+  return request(`/rooms/${code}`, { token })
+}
+
+export function startRoom(token, code) {
+  return request(`/rooms/${code}/start`, { token, method: 'POST' })
+}
+
+// Kết thúc (hoặc hủy) phòng: các lượt đang dở được nộp tự động -> { room, settled }
+export function endRoom(token, code) {
+  return request(`/rooms/${code}/end`, { token, method: 'POST' })
+}
+
+// Bắt đầu (hoặc tiếp tục) làm bài trong phòng đang chạy: { attempt, questions, serverNow, resumed }
+export function startRoomAttempt(token, code) {
+  return request('/attempts/room', { token, method: 'POST', body: { code } })
 }
 
 // Ghi sự kiện analytics ('visit' | 'register'). Lỗi được bỏ qua để không ảnh hưởng người dùng.
