@@ -1,0 +1,278 @@
+/* Giao diện làm bài và kết quả (Phase 4). Mobile-first, dùng token trong index.css nên tự đổi theo chế độ tối. */
+
+.attempt-rules {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* Thanh đồng hồ dính dưới thanh đầu trang để luôn thấy giờ còn lại */
+.attempt-bar {
+  position: sticky;
+  top: calc(3.5rem + env(safe-area-inset-top, 0px));
+  z-index: 5;
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.5rem 0.875rem;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.attempt-bar-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.attempt-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.attempt-clock-warn {
+  color: var(--danger);
+}
+
+.attempt-progress {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.attempt-save {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.attempt-save-error {
+  color: var(--danger);
+}
+
+/* Lựa chọn đáp án: cả hàng là vùng chạm */
+.choice-list {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.choice-tf {
+  grid-template-columns: 1fr 1fr;
+}
+
+.choice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: 3rem;
+  padding: 0.75rem 0.875rem;
+  font-weight: 400;
+  font-size: 1rem;
+  line-height: 1.5;
+  background: var(--surface-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, transform 0.15s var(--ease);
+}
+
+.choice:active {
+  transform: scale(0.99);
+}
+
+.choice-on {
+  background: var(--tint);
+  border-color: var(--accent);
+}
+
+.choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.choice input:focus-visible ~ .choice-key,
+.choice-tf input:focus-visible ~ .choice-text {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.choice-key {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.choice-on .choice-key {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.choice-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.choice-tf .choice {
+  justify-content: center;
+  font-weight: 600;
+}
+
+.attempt-clear {
+  justify-self: start;
+  min-height: 2rem;
+  font-size: 0.875rem;
+}
+
+.attempt-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.attempt-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+/* Lưới số câu */
+.attempt-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.75rem, 1fr));
+  gap: 0.5rem;
+}
+
+.attempt-dot {
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  min-height: 2.75rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.attempt-dot-done {
+  color: var(--accent);
+  background: var(--tint);
+  border-color: transparent;
+}
+
+.attempt-dot-cur {
+  border: 2px solid var(--accent);
+}
+
+.attempt-confirm {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+}
+
+.attempt-confirm p {
+  font-weight: 600;
+  color: var(--warn-ink);
+}
+
+/* ---------- Kết quả ---------- */
+.result-card {
+  justify-items: center;
+  text-align: center;
+}
+
+.result-score {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  color: var(--muted);
+}
+
+.result-score span {
+  padding: 0 0.15em;
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+  background: linear-gradient(transparent 60%, var(--hl) 60%, var(--hl) 92%, transparent 92%);
+}
+
+.result-sub {
+  font-weight: 600;
+}
+
+.msg-warn {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--warn-ink);
+}
+
+.review-lines {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.review-tag {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: 999px;
+}
+
+.review-tag-ok {
+  color: var(--ok);
+}
+
+.q-option-wrong {
+  border-color: var(--danger);
+}
+
+.review-status-correct {
+  color: var(--ok);
+  background: var(--surface-2);
+}
+
+.review-status-wrong {
+  color: var(--danger);
+  background: var(--surface-2);
+}
+
+.review-status-unanswered,
+.review-status-pending {
+  color: var(--muted);
+  background: var(--surface-2);
+}

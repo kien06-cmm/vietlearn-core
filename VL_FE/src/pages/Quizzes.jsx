@@ -5,11 +5,12 @@ import { settingsText } from '../services/quizText.js'
 import Icon from '../components/Icon.jsx'
 import QuizEditor from '../components/QuizEditor.jsx'
 import QuizVersions from '../components/QuizVersions.jsx'
+import AttemptRunner from '../components/AttemptRunner.jsx'
 import './Questions.css'
 import './Quizzes.css'
 
 // Danh sách quiz
-function QuizList({ getToken, onCreate, onEdit, onVersions }) {
+function QuizList({ getToken, onCreate, onEdit, onVersions, onTake }) {
   const [quizzes, setQuizzes] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -117,9 +118,14 @@ function QuizList({ getToken, onCreate, onEdit, onVersions }) {
               </div>
             ) : (
               <div className="doc-actions">
-                <button className="btn btn-primary" disabled={busy} onClick={() => onEdit(q.id)}>
+                <button className="btn btn-secondary" disabled={busy} onClick={() => onEdit(q.id)}>
                   Sửa
                 </button>
+                {q.currentVersion > 0 && (
+                  <button className="btn btn-primary" disabled={busy} onClick={() => onTake(q)}>
+                    Làm thử
+                  </button>
+                )}
                 {q.currentVersion > 0 && (
                   <button className="btn btn-secondary" disabled={busy} onClick={() => onVersions(q)}>
                     Lịch sử version
@@ -141,9 +147,21 @@ function QuizList({ getToken, onCreate, onEdit, onVersions }) {
 }
 
 export default function Quizzes({ getToken }) {
-  // view: { name: 'list' } | { name: 'edit', id? } (id rỗng = tạo mới) | { name: 'versions', quiz }
+  // view: { name: 'list' } | { name: 'edit', id? } (id rỗng = tạo mới) | { name: 'versions', quiz } | { name: 'attempt', quiz, run }
   const [view, setView] = useState({ name: 'list' })
   const toList = () => setView({ name: 'list' })
+
+  if (view.name === 'attempt') {
+    return (
+      <AttemptRunner
+        key={view.run}
+        getToken={getToken}
+        quiz={view.quiz}
+        onExit={toList}
+        onRetry={() => setView({ name: 'attempt', quiz: view.quiz, run: view.run + 1 })}
+      />
+    )
+  }
 
   if (view.name === 'edit') {
     return <QuizEditor key={view.id ?? 'new'} getToken={getToken} quizId={view.id} onBack={toList} />
@@ -164,6 +182,7 @@ export default function Quizzes({ getToken }) {
       onCreate={() => setView({ name: 'edit' })}
       onEdit={(id) => setView({ name: 'edit', id })}
       onVersions={(quiz) => setView({ name: 'versions', quiz })}
+      onTake={(quiz) => setView({ name: 'attempt', quiz, run: 1 })}
     />
   )
 }
