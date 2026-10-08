@@ -107,14 +107,16 @@ export default function Settings({ profile, save, getToken, reauthenticate, logo
       <section className="card">
         <h2>Giao diện</h2>
 
-        <label className="row">
-          Chế độ tối
-          <input
-            type="checkbox"
-            checked={prefs.darkMode}
-            onChange={(e) => changePrefs({ darkMode: e.target.checked })}
-          />
-        </label>
+        <button
+          type="button"
+          className="toggle-row"
+          role="switch"
+          aria-checked={prefs.darkMode}
+          onClick={() => changePrefs({ darkMode: !prefs.darkMode })}
+        >
+          <span>Chế độ tối</span>
+          <span className="switch" aria-hidden="true" />
+        </button>
 
         <div>
           <p className="hint">Cỡ chữ</p>

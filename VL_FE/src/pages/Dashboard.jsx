@@ -8,7 +8,7 @@ import CreditCard from '../components/CreditMeter.jsx'
 const LINKS = [
   { href: '#/documents', title: 'Tài liệu', text: 'Tải tài liệu lên để tạo câu hỏi.' },
   { href: '#/questions', title: 'Câu hỏi', text: 'Tạo và duyệt câu hỏi từ tài liệu.' },
-  { href: '#/quiz', title: 'Quiz & phòng', text: 'Tạo bài, mở phòng cho cả lớp.', soon: true },
+  { href: '#/quiz', title: 'Quiz & phòng', text: 'Tạo bài, mở phòng cho cả lớp.' },
   { href: '#/settings', title: 'Cài đặt', text: 'Giao diện, hồ sơ, tài khoản.' },
 ]
 
