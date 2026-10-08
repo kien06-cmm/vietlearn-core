@@ -14,6 +14,7 @@ import documentsRouter from './routes/documents.js';
 import docAiRouter from './routes/docAi.js';
 import topicsRouter from './routes/topics.js';
 import questionsRouter from './routes/questions.js';
+import quizzesRouter from './routes/quizzes.js';
 import { startWorker } from './worker/index.js';
 
 await initMonitoring();
@@ -273,6 +274,11 @@ app.use('/documents', docAiRouter);
 // ---------------------------------------------------------------------------
 app.use('/topics', topicsRouter);
 app.use('/questions', questionsRouter);
+
+// ---------------------------------------------------------------------------
+// Quiz (Phase 4)
+// ---------------------------------------------------------------------------
+app.use('/quizzes', quizzesRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi
