@@ -13,7 +13,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Settings from './pages/Settings.jsx'
 import Documents from './pages/Documents.jsx'
 import Questions from './pages/Questions.jsx'
-import ComingSoon from './pages/ComingSoon.jsx'
+import Quizzes from './pages/Quizzes.jsx'
 import './App.css'
 
 function App() {
@@ -142,7 +142,7 @@ function App() {
       {route === 'documents' && <Documents getToken={getToken} />}
       {route === 'questions' && <Questions getToken={getToken} />}
       {route === 'quiz' && (
-        <ComingSoon icon="target" title="Quiz & phòng" text="Tạo quiz, mở phòng và làm bài cùng lúc trên điện thoại. Có ở bản cập nhật sau." />
+        <Quizzes getToken={getToken} />
       )}
       {route === 'settings' &&
         (profile ? (

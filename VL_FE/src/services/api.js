@@ -197,6 +197,94 @@ export function askDocument(token, id, question) {
   return request(`/documents/${id}/ask`, { token, method: 'POST', body: { question } })
 }
 
+// ---------- Quiz (Phase 4) ----------
+
+// Danh sách quiz của tôi: { quizzes: [{ id, title, questionCount, settings, currentVersion, hasUnpublishedChanges, ... }] }
+export function listQuizzes(token) {
+  return request('/quizzes', { token })
+}
+
+// Chi tiết bản nháp: { quiz: { ..., questions: [{ id, type, stem, ... }] } }
+export function getQuiz(token, id) {
+  return request(`/quizzes/${id}`, { token })
+}
+
+// { title, description?, questionIds?, settings? } -> { quiz }
+export function createQuiz(token, data) {
+  return request('/quizzes', { token, method: 'POST', body: data })
+}
+
+// Sửa bản nháp (không đụng tới các version đã publish)
+export function updateQuiz(token, id, changes) {
+  return request(`/quizzes/${id}`, { token, method: 'PATCH', body: changes })
+}
+
+export function deleteQuiz(token, id) {
+  return request(`/quizzes/${id}`, { token, method: 'DELETE' })
+}
+
+// Publish: chụp bản nháp thành version mới bất biến -> { version, quiz }
+export function publishQuiz(token, id) {
+  return request(`/quizzes/${id}/publish`, { token, method: 'POST' })
+}
+
+export function listQuizVersions(token, id) {
+  return request(`/quizzes/${id}/versions`, { token })
+}
+
+// Nội dung một version (không có đáp án)
+export function getQuizVersion(token, id, version) {
+  return request(`/quizzes/${id}/versions/${version}`, { token })
+}
+
+// Sao chép thành quiz mới: từ bản nháp hiện tại, hoặc từ một version nếu có `version` -> { quiz, dropped }
+export function forkQuiz(token, id, version) {
+  return request(`/quizzes/${id}/fork`, { token, method: 'POST', body: version ? { version } : {} })
+}
+
+// ---------- Làm bài (Phase 4) ----------
+// Đáp án đúng không bao giờ có trong đề; chỉ xem được sau khi nộp (getAttemptResult).
+// Câu trả lời: single = số (index gốc), multi = mảng số, truefalse = true (Đúng) / false (Sai), fill/short = chuỗi, null = xóa.
+
+// Bắt đầu (hoặc tiếp tục lượt đang dở): { attempt, questions, serverNow, resumed }
+export function startAttempt(token, quizId, version) {
+  return request('/attempts', { token, method: 'POST', body: version ? { quizId, version } : { quizId } })
+}
+
+// Mở lại một lượt (tải lại trang): { attempt, questions (null nếu đã nộp), serverNow }
+export function getAttempt(token, id) {
+  return request(`/attempts/${id}`, { token })
+}
+
+// Lưu nháp: chỉ gửi các câu vừa đổi -> { savedAt, rejected }. Quá giờ thì backend trả 409 code 'time-up'.
+export function saveAttemptAnswers(token, id, answers) {
+  return request(`/attempts/${id}/answers`, { token, method: 'PUT', body: { answers } })
+}
+
+// Nộp bài (có thể kèm câu trả lời cuối). Nộp lại bài đã nộp trả lại kết quả cũ -> { already, submitReason, result }
+export function submitAttempt(token, id, answers) {
+  return request(`/attempts/${id}/submit`, { token, method: 'POST', body: answers ? { answers } : {} })
+}
+
+// Xem lại sau khi nộp: { attempt, review: [{ id, type, stem, options, given, correct, status, explanation }] }
+export function getAttemptResult(token, id) {
+  return request(`/attempts/${id}/result`, { token })
+}
+
+// Lịch sử lượt làm của tôi (tuỳ chọn lọc theo quiz)
+export function listAttempts(token, quizId) {
+  return request(`/attempts${quizId ? `?quizId=${encodeURIComponent(quizId)}` : ''}`, { token })
+}
+
+// Ghi sự kiện chống gian lận: 'tab_hidden' | 'tab_visible' | 'window_blur' | 'window_focus' | 'copy' | 'paste'. Lỗi bị bỏ qua.
+export async function logAttemptEvent(token, id, type) {
+  try {
+    await request(`/attempts/${id}/events`, { token, method: 'POST', body: { type } })
+  } catch {
+    // ghi nhận là phụ, không làm gián đoạn bài làm
+  }
+}
+
 // Ghi sự kiện analytics ('visit' | 'register'). Lỗi được bỏ qua để không ảnh hưởng người dùng.
 export async function trackEvent(type, { token, meta } = {}) {
   try {

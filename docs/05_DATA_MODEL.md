@@ -76,9 +76,12 @@ Sửa tay một câu chạy lại đúng luật kiểm tra như câu AI sinh, r�
 
 ## Phase 4 — Quiz, Phòng, Làm bài (phác thảo)
 
-- `quizzes/{quizId}` và `quizzes/{quizId}/versions/{versionId}` (bất biến sau publish; hỗ trợ fork).
+- `quizzes/{quizId}` (bản nháp: `title`, `description`, `questionIds[]`, `settings`, `currentVersion`, hash để biết có thay đổi chưa publish), `quizVersions/{quizId}_{n}` (bản chụp câu hỏi, **bất biến** sau publish) và `quizVersionKeys/{quizId}_{n}` (đáp án, chỉ backend đọc). Hỗ trợ fork. Đã làm.
 - `rooms/{roomId}`: `quizVersionId`, `hostId`, `code`, `status` (`WAITING` → `RUNNING` → `ENDED`), `maxParticipants`. Trạng thái do server quyết định.
-- `attempts/{attemptId}`: `roomId?`, `quizVersionId`, `participant` (uid hoặc guest), `seed` (random phía server), `answers`, `startedAt`, `submittedAt`, `score`, `events[]` (tab visibility, ...).
+- `attempts/{attemptId}` (đã làm cho làm bài một mình, phòng sẽ dùng lại): `quizId`, `quizVersion`, `participant` (`{ type: user|guest, id, displayName? }`), `participantKey`, `roomId?`, `seed` (server cấp, dựng lại đúng thứ tự câu/đáp án), `status` (`in_progress` → `submitted`), `answers`, `startedAt`, `deadlineAt` (server tính), `submittedAt`, `submitReason` (`submitted` | `timeout`), `result` (điểm + trạng thái từng câu), `events[]` (tab_hidden, tab_visible, window_blur, window_focus, copy, paste; tối đa 200).
+- `attemptCounters/{actorType_actorId__quizId}`: `count` (số lượt đã mở, để chặn quá `maxAttempts`), `activeAttemptId` (lượt đang làm dở, để tiếp tục thay vì tạo mới).
+- Câu hỏi nào không tự chấm được (trả lời ngắn) thì không tính vào điểm; nhiều đáp án chấm đúng-đủ hoặc sai, không có điểm từng phần ở V1.
+- API: `POST /attempts` · `GET /attempts?quizId` · `GET /attempts/:id` · `PUT /attempts/:id/answers` · `POST /attempts/:id/submit` · `GET /attempts/:id/result` (chỉ sau khi nộp) · `POST /attempts/:id/events`.
 
 ## Phase 5 — Vòng lặp học tập (phác thảo)
 

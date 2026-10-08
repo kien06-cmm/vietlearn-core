@@ -15,6 +15,7 @@ import docAiRouter from './routes/docAi.js';
 import topicsRouter from './routes/topics.js';
 import questionsRouter from './routes/questions.js';
 import quizzesRouter from './routes/quizzes.js';
+import attemptsRouter from './routes/attempts.js';
 import { startWorker } from './worker/index.js';
 
 await initMonitoring();
@@ -33,11 +34,14 @@ const origins = process.env.CORS_ORIGIN
 app.use(cors({ origin: origins }));
 // Riêng route nhập đề có sẵn nhận file dạng base64 (tối đa 2 MB) nên cho phép body lớn hơn. Phải đặt TRƯỚC giới hạn 10kb chung bên dưới.
 app.use('/questions/import', express.json({ limit: '3mb' }));
+// Lưu nháp/nộp bài có thể gửi tới 100 câu trả lời nên cần giới hạn lớn hơn 10kb
+app.use('/attempts', express.json({ limit: '64kb' }));
 app.use(express.json({ limit: '10kb' }));
 app.use(requestLogger);
 
 // Giới hạn chung cho toàn API: 120 request / phút / IP
-app.use(rateLimit({ windowMs: 60_000, max: 120, name: 'global' }));
+// Riêng /attempts có giới hạn riêng (theo người làm bài) vì cả lớp có thể dùng chung một IP
+app.use(rateLimit({ windowMs: 60_000, max: 120, name: 'global', skip: (req) => req.path.startsWith('/attempts') }));
 
 // ---------------------------------------------------------------------------
 // Health check
@@ -279,6 +283,8 @@ app.use('/questions', questionsRouter);
 // Quiz (Phase 4)
 // ---------------------------------------------------------------------------
 app.use('/quizzes', quizzesRouter);
+// Làm bài + chấm điểm (Phase 4)
+app.use('/attempts', attemptsRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi
