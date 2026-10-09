@@ -86,3 +86,10 @@ Quy tắc: mọi phase đều deploy lên staging trước. Chưa public khi ch�
 - [ ] Chọn nhà cung cấp AI và lớp trừu tượng (Phase 3).
 - [ ] Hàng đợi: Redis (BullMQ) hay cách khác.
 - [ ] Realtime nhiều instance: cần Redis pub/sub nếu vượt một instance (V1 chạy một instance là đủ).
+
+## 10. Vòng lặp học tập (Phase 5)
+
+- Sau khi nộp bài, `finalizeAttempt` (chỉ chạy một lần cho mỗi bài, trong nền, lỗi không làm hỏng việc chấm) ghi: sổ lỗi sai và mức thành thạo của người dùng (chỉ tài khoản), và thống kê phòng (nếu bài làm trong phòng) cho Heatmap của chủ phòng.
+- Chi phí đọc/ghi: thống kê phòng ghi bằng `increment` một batch mỗi bài nộp (1 + số câu tự chấm, tối đa 101 lần ghi); chủ phòng xem Heatmap tốn 1 lượt đọc phòng + 1 lượt đọc version + số câu + tối đa 100 chủ đề, không đọc lại từng bài làm. Giao diện chủ phòng chỉ tải lại Heatmap khi số bài nộp đổi.
+- Quyền riêng tư: Heatmap chỉ hiện khi đủ 5 bài nộp, chỉ có số liệu gộp, không có tên người (ngưỡng được áp ở backend nên client không lách được). Chỉ chủ phòng đọc được; người khác nhận 404.
+- Khách → tài khoản: chứng minh quyền sở hữu bằng token khách (bí mật chỉ máy của khách có, Firestore chỉ lưu bản băm), thêm đăng nhập tài khoản. Một token khách chỉ chuyển được một lần cho mỗi bài (transaction), giới hạn 6 lần gọi/phút/người, tối đa 50 bài mỗi lần.

@@ -1,8 +1,8 @@
 // Chức năng: form đăng nhập, tạo tài khoản và quên mật khẩu.
 import { useState } from 'react'
 
-export default function LoginForm({ onLogin, onRegister, onReset }) {
-  const [mode, setMode] = useState('login')
+export default function LoginForm({ onLogin, onRegister, onReset, initialMode = 'login', guestNote = '' }) {
+  const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -43,6 +43,8 @@ export default function LoginForm({ onLogin, onRegister, onReset }) {
   return (
     <form className="card" onSubmit={handleSubmit}>
       <h2>{title}</h2>
+
+      {guestNote && !isReset && <p className="hint">{guestNote}</p>}
 
       <label>
         Email

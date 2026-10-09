@@ -22,7 +22,7 @@ const RULES = (
 )
 
 // Xem kết quả khi phòng đã kết thúc (vào lại sau khi chủ phòng đã đóng phòng)
-function EndedView({ getAuth, attemptId, onLeave }) {
+function EndedView({ getAuth, attemptId, onLeave, onCreateAccount }) {
   const [res, setRes] = useState(null)
   const [error, setError] = useState('')
 
@@ -42,7 +42,7 @@ function EndedView({ getAuth, attemptId, onLeave }) {
     }
   }, [getAuth, attemptId])
 
-  if (res) return <AttemptResult res={res} onExit={onLeave} exitLabel="Rời phòng" />
+  if (res) return <AttemptResult res={res} onExit={onLeave} exitLabel="Rời phòng" onCreateAccount={onCreateAccount} />
 
   return (
     <section className="card empty">
@@ -62,7 +62,7 @@ function EndedView({ getAuth, attemptId, onLeave }) {
 }
 
 // Phòng chờ + làm bài. Hỏi trạng thái phòng định kỳ cho tới khi phòng chạy hoặc kết thúc.
-function RoomView({ code, initialRoom, getAuth, displayName, onLeave }) {
+function RoomView({ code, initialRoom, getAuth, displayName, onLeave, onCreateAccount }) {
   const [room, setRoom] = useState(initialRoom)
   const [attemptId, setAttemptId] = useState(null)
   const [offline, setOffline] = useState(false)
@@ -121,12 +121,12 @@ function RoomView({ code, initialRoom, getAuth, displayName, onLeave }) {
 
   if (inAttempt) {
     return (
-      <AttemptRunner getToken={getAuth} roomCode={code} onExit={onLeave} exitLabel="Rời phòng" roomEnded={status === 'ENDED'} live={connected} />
+      <AttemptRunner getToken={getAuth} roomCode={code} onExit={onLeave} exitLabel="Rời phòng" roomEnded={status === 'ENDED'} live={connected} onCreateAccount={onCreateAccount} />
     )
   }
 
   if (status === 'ENDED') {
-    return <EndedView getAuth={getAuth} attemptId={attemptId} onLeave={onLeave} />
+    return <EndedView getAuth={getAuth} attemptId={attemptId} onLeave={onLeave} onCreateAccount={onCreateAccount} />
   }
 
   return (
@@ -159,7 +159,7 @@ function RoomView({ code, initialRoom, getAuth, displayName, onLeave }) {
   )
 }
 
-export default function RoomJoin({ getToken, isGuest = false, initialCode = '', onBack, backLabel = 'Quay lại' }) {
+export default function RoomJoin({ getToken, isGuest = false, initialCode = '', onBack, backLabel = 'Quay lại', onCreateAccount }) {
   const [stage, setStage] = useState('form') // form | joining | in
   const [code, setCode] = useState(initialCode.toUpperCase())
   const [name, setName] = useState(() => (isGuest ? loadGuest()?.guest.displayName || '' : ''))
@@ -209,7 +209,16 @@ export default function RoomJoin({ getToken, isGuest = false, initialCode = '', 
   }
 
   if (stage === 'in' && joined) {
-    return <RoomView code={joined.room.code} initialRoom={joined.room} getAuth={getAuth} displayName={joined.displayName} onLeave={handleLeave} />
+    return (
+      <RoomView
+        code={joined.room.code}
+        initialRoom={joined.room}
+        getAuth={getAuth}
+        displayName={joined.displayName}
+        onLeave={handleLeave}
+        onCreateAccount={isGuest ? onCreateAccount : undefined}
+      />
+    )
   }
 
   return (

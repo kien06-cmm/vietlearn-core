@@ -153,7 +153,7 @@ function TopicSummary({ topics }) {
   )
 }
 
-export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về danh sách quiz' }) {
+export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về danh sách quiz', onCreateAccount }) {
   const [onlyMissed, setOnlyMissed] = useState(false)
   const { attempt, review, confidenceSummary, errorSummary, topics } = res
   const r = attempt.result
@@ -205,6 +205,18 @@ export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về 
           </button>
         </div>
       </section>
+
+      {onCreateAccount && (
+        <section className="card">
+          <h2>Lưu kết quả này</h2>
+          <p className="hint">
+            Bạn đang vào với tư cách khách nên kết quả chỉ giữ trên máy này trong vài giờ. Tạo tài khoản miễn phí, kết quả và các câu sai sẽ được chuyển sang sổ lỗi sai để ôn lại theo lịch 1 → 3 → 7 ngày.
+          </p>
+          <button className="btn btn-primary" onClick={onCreateAccount}>
+            Tạo tài khoản để lưu kết quả
+          </button>
+        </section>
+      )}
 
       <ConfidenceSummary summary={confidenceSummary} />
       <ErrorSummary summary={errorSummary} />

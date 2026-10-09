@@ -384,6 +384,22 @@ export function getMastery(token) {
   return request('/review/mastery', { token })
 }
 
+// ---------- Heatmap + chuyển kết quả khách (Phase 5) ----------
+
+// Heatmap cho chủ phòng: { heatmap: { ready, submitted, needed, questions: [{ id, no, stem, topicId, answered, wrong, skipped, wrongRate, level: 'hot' | 'warm' | 'mild' | 'cool' | 'none', enough }],
+//   topics: [{ topicId, name, subject, chapter, answered, wrong, wrongRate, level, enough }],
+//   reviewPoints: [{ kind: 'topic' | 'question', title, detail, wrongRate, wrong, answered }] (tối đa 3) } }
+// Chưa đủ 5 bài nộp thì ready = false và các danh sách rỗng.
+export function getRoomHeatmap(token, code) {
+  return request(`/rooms/${code}/heatmap`, { token })
+}
+
+// Khách vừa tạo tài khoản: chuyển các bài đã nộp lúc còn là khách sang tài khoản. token = token đăng nhập của tài khoản, guestToken = token phiên khách.
+// -> { moved, unfinished }. Phiên khách hết hạn thì lỗi 404 với code 'guest-expired'.
+export function claimGuestAttempts(token, guestToken) {
+  return request('/attempts/claim-guest', { token, method: 'POST', body: { guestToken } })
+}
+
 // Ghi sự kiện analytics ('visit' | 'register'). Lỗi được bỏ qua để không ảnh hưởng người dùng.
 export async function trackEvent(type, { token, meta } = {}) {
   try {

@@ -4,6 +4,7 @@ import { createRoom, endRoom, getRoom, listMyRooms, startRoom } from '../service
 import { settingsText } from '../services/quizText.js'
 import { useRoomSocket } from '../services/roomSocket.js'
 import Icon from './Icon.jsx'
+import RoomHeatmap from './RoomHeatmap.jsx'
 import '../pages/Questions.css'
 import '../pages/Quizzes.css'
 import '../pages/Attempt.css'
@@ -336,6 +337,8 @@ export default function RoomHost({ getToken, quiz, onBack }) {
           )}
         </section>
       )}
+
+      {data && room.status !== 'WAITING' && <RoomHeatmap getToken={getToken} code={code} submitted={data.counts.submitted} ended={ended} />}
     </>
   )
 }

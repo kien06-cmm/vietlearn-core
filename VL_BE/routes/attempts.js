@@ -1,7 +1,7 @@
 // Chức năng: API làm bài (Phase 4) - mở lượt làm (seed + xáo trộn do server quyết định, giới hạn số lần, tiếp tục lượt đang dở), lưu nháp tự động, nộp bài (chấm ở server, nộp nhiều lần vẫn chỉ chấm một lần), xem lại kết quả, ghi sự kiện chống gian lận.
 // Đáp án đúng nằm ở quizVersionKeys và chỉ được đọc khi chấm hoặc khi xem lại SAU KHI đã nộp.
 // Lượt làm do chủ quiz tự mở (làm thử) hoặc do người trong phòng mở (POST /attempts/room, roomId = mã phòng). Phòng kết thúc thì các lượt đang dở trong phòng được nộp tự động.
-// Phase 5: ghi thêm mức tự tin, số lần đổi đáp án và thời gian từng câu; trang xem lại trả thêm thống kê theo mức tự tin, theo chủ đề và gợi ý kiểu sai.
+// Phase 5: ghi thêm mức tự tin, số lần đổi đáp án và thời gian từng câu; trang xem lại trả thêm thống kê theo mức tự tin, theo chủ đề và gợi ý kiểu sai. Nộp bài trong phòng thì cộng thống kê cho Heatmap của chủ phòng (roomStats.js). POST /attempts/claim-guest chuyển bài khách đã nộp sang tài khoản vừa tạo.
 import { Router } from 'express';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -37,6 +37,8 @@ import { hub, safePublish } from '../realtime/roomHub.js';
 import { recordMistakes } from '../mistakes.js';
 import { recordTopicOutcomes } from '../mastery.js';
 import { outcomesByTopic } from '../quiz/masteryRules.js';
+import { recordRoomStats } from '../roomStats.js';
+import { findGuestSession } from '../guestSessions.js';
 
 const router = Router();
 const anyActor = requireRole(['user', 'guest']);
@@ -256,6 +258,13 @@ export async function finalizeAttempt(attemptId, { patch = null, confidencePatch
         );
     }
 
+    // Heatmap của chủ phòng (Phase 5): cộng đúng/sai từng câu của bài này vào thống kê phòng. Chạy nền, lỗi ở đây không được làm hỏng việc chấm bài.
+    if (!out.already && a0.roomId) {
+        recordRoomStats({ code: a0.roomId, questions: qsOf(version, out.attempt), statuses: out.attempt.result?.statuses }).catch((err) =>
+            console.error(JSON.stringify({ time: new Date().toISOString(), level: 'error', message: `roomStats: ${err.message}` }))
+        );
+    }
+
     // Chủ phòng thấy điểm ngay khi có người nộp (đẩy sau khi đã lưu xong; lỗi đẩy tin không ảnh hưởng việc chấm)
     if (!out.already && pRef) {
         safePublish(() =>
@@ -428,6 +437,68 @@ router.post(
         const id = out.createdId || out.resumedId;
         const snap = await attempts().doc(id).get();
         await sendAttempt(res, id, snap.data(), out.createdId ? 201 : 200, { resumed: Boolean(out.resumedId) });
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Khách tạo tài khoản xong thì chuyển các bài đã nộp lúc còn là khách sang tài khoản mới (Phase 5: "Tạo tài khoản để lưu kết quả").
+// Người gọi đăng nhập bằng tài khoản (Bearer) và gửi kèm token khách trong body để chứng minh bài làm đó là của mình.
+// Mỗi bài chuyển trong một transaction nên gọi lại hay gọi song song cũng không chuyển hai lần. Bài chuyển xong thì vào sổ lỗi sai + mức thành thạo của tài khoản.
+// Bài của khách còn đang làm dở không chuyển (người đó nên nộp bài trước).
+// ---------------------------------------------------------------------------
+const MAX_CLAIM = 50;
+const claimSchema = z.object({ guestToken: z.string().min(20).max(100) }).strict();
+
+router.post(
+    '/claim-guest',
+    userOnly,
+    actorLimit('attempts-claim', 6),
+    handle(async (req, res) => {
+        const parsed = claimSchema.safeParse(req.body);
+        if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+
+        const session = await findGuestSession(parsed.data.guestToken);
+        if (!session) return fail(res, 404, 'Phiên khách đã hết hạn nên không chuyển được kết quả', 'guest-expired');
+
+        const uid = req.actor.id;
+        const guestKey = `guest:${session.guestId}`;
+        const snap = await attempts().where('participantKey', '==', guestKey).limit(MAX_CLAIM).get();
+
+        let moved = 0;
+        let unfinished = 0;
+        for (const d of snap.docs) {
+            if (d.data().status !== 'submitted') {
+                unfinished++;
+                continue;
+            }
+            const won = await getDb().runTransaction(async (tx) => {
+                const fresh = await tx.get(d.ref);
+                const cur = fresh.data();
+                if (cur.participantKey !== guestKey || cur.status !== 'submitted') return null;
+                tx.update(d.ref, {
+                    participant: { type: 'user', id: uid },
+                    participantKey: `user:${uid}`,
+                    claimedFromGuest: session.guestId,
+                    claimedAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+                return cur;
+            });
+            if (!won) continue;
+            moved++;
+
+            // Sổ lỗi sai + mức thành thạo. Lỗi ở đây không làm mất việc đã chuyển (bài vẫn xem lại được trong tài khoản).
+            try {
+                const [version, keys] = await Promise.all([loadVersion(won.quizId, won.quizVersion), loadKeys(won.quizId, won.quizVersion)]);
+                const questions = qsOf(version, won);
+                await recordMistakes({ uid, quizId: won.quizId, quizVersion: won.quizVersion, questions, keys, attempt: won });
+                await recordTopicOutcomes({ uid, outcomes: outcomesByTopic(questions, won.result?.statuses, won.confidence) });
+            } catch (err) {
+                console.error(JSON.stringify({ time: new Date().toISOString(), level: 'error', message: `claim-guest: ${err.message}` }));
+            }
+        }
+
+        res.status(200).json({ status: 'success', moved, unfinished });
     })
 );
 

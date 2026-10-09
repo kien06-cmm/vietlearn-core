@@ -10,6 +10,9 @@ import { requireRole } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { finalizeAttempt } from './attempts.js';
 import { hub, safePublish } from '../realtime/roomHub.js';
+import { loadRoomStats } from '../roomStats.js';
+import { loadTopicNames } from '../mistakes.js';
+import { MIN_SUBMISSIONS, buildHeatmap } from '../quiz/heatmapRules.js';
 import {
     DEFAULT_MAX_PARTICIPANTS,
     MAX_ACTIVE_ROOMS_PER_HOST,
@@ -295,6 +298,32 @@ router.get(
             room: toPublicRoom(code, room, now),
             me: { displayName: pSnap.data().displayName, attemptId: pSnap.data().attemptId ?? null }
         });
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Heatmap cho chủ phòng (Phase 5): câu nào cả lớp sai nhiều, chủ đề nào yếu, và "3 điều cần ôn lại".
+// Chỉ hiện thống kê khi đủ ngưỡng 5 bài nộp (xem quiz/heatmapRules.js); dưới ngưỡng thì chỉ trả số bài đã nộp. Không có tên người nào trong kết quả.
+// ---------------------------------------------------------------------------
+router.get(
+    '/:code/heatmap',
+    userOnly,
+    actorLimit('rooms-heatmap', 30),
+    handle(async (req, res) => {
+        const { code, room } = await loadHostRoom(req);
+        const submitted = room.submittedCount ?? 0;
+
+        // Chưa đủ ngưỡng: không đọc thêm gì cả
+        if (submitted < MIN_SUBMISSIONS) {
+            return res.status(200).json({ status: 'success', heatmap: buildHeatmap({ questions: [], stats: {}, submitted }) });
+        }
+
+        const verSnap = await getDb().collection('quizVersions').doc(`${room.quizId}_${room.quizVersion}`).get();
+        if (!verSnap.exists) return fail(res, 404, 'Không tìm thấy version của quiz');
+        const questions = verSnap.data().questions || [];
+
+        const [stats, topicInfo] = await Promise.all([loadRoomStats(code), loadTopicNames(questions.map((q) => q.topicId))]);
+        res.status(200).json({ status: 'success', heatmap: buildHeatmap({ questions, stats, submitted, topicInfo }) });
     })
 );
 

@@ -97,7 +97,7 @@ export function QuestionInput({ q, value, onChange }) {
 }
 
 // roomCode: làm bài trong phòng (không có màn bắt đầu, vào bài ngay; phòng kết thúc thì server nộp bài giúp). getToken dùng được cho cả tài khoản và khách.
-export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetry, exitLabel, roomEnded = false, live = false }) {
+export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetry, exitLabel, roomEnded = false, live = false, onCreateAccount }) {
   const [phase, setPhase] = useState('intro') // intro | starting | running | submitting | done
   const [error, setError] = useState('')
   const [session, setSession] = useState(null) // { attempt, questions, resumed }
@@ -369,7 +369,7 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
 
   // ---------- Giao diện ----------
   if (phase === 'done' && result) {
-    return <AttemptResult res={result} onExit={onExit} onRetry={onRetry} exitLabel={exitLabel} />
+    return <AttemptResult res={result} onExit={onExit} onRetry={onRetry} exitLabel={exitLabel} onCreateAccount={onCreateAccount} />
   }
 
   if (roomCode && (phase === 'intro' || phase === 'starting')) {
