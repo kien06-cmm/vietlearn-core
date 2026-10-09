@@ -1,5 +1,6 @@
 // Chức năng: luật thuần cho "Luyện phần yếu" (Phase 5) - chọn bộ câu luyện cho một chủ đề từ câu từng sai và câu đã duyệt trong ngân hàng. Không gọi mạng/DB nên dễ test.
-// Không gọi AI nên không tốn credits. Tạo câu mới bằng AI từ tài liệu (Weakness -> Practice) là việc riêng.
+// Không gọi AI nên không tốn credits. Câu mới do AI soạn từ câu từng sai (Weakness -> Practice) được tạo ở job riêng (ai/weaknessRules.js, worker/generatePractice.js),
+// lưu vào questions với origin 'ai-practice' và nằm trong ngân hàng ở đây như câu bình thường (có cờ unreviewed).
 
 export const MISTAKE_SHARE = 0.6; // tối đa 60% bộ câu là câu từng sai, phần còn lại là câu mới từ ngân hàng để không chỉ lặp lại câu cũ
 
@@ -43,6 +44,7 @@ export function toPracticeQuestion(q) {
         options: (q.options || []).map((text, index) => ({ index, text })),
         topicId: q.topicId ?? null,
         stage: null,
-        fresh: true
+        fresh: true,
+        unreviewed: q.reviewStatus !== 'approved' // câu AI tạo riêng để luyện phần yếu, chủ sở hữu chưa duyệt: giao diện hiện nhãn
     };
 }

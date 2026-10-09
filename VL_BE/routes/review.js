@@ -22,6 +22,10 @@ import { countOf, loadTopicNames, mistakesCol } from '../mistakes.js';
 import { recordTopicOutcomes, statsCol } from '../mastery.js';
 import { buildKnowledgeMap, outcomesByTopic, toMasteryItem } from '../quiz/masteryRules.js';
 import { pickPractice, toPracticeQuestion } from '../quiz/practiceRules.js';
+import { creditLimits, getPlan } from '../config/plans.js';
+import { QuotaError, currentPeriod, reserveCredits } from '../credits.js';
+import { MAX_PRACTICE_COUNT } from '../ai/weaknessRules.js';
+import { wakeWorker } from '../worker/index.js';
 
 const router = Router();
 const userOnly = requireRole(['user']);
@@ -291,7 +295,7 @@ router.get(
         const limit = intParam(req.query.limit, 1, MAX_REVIEW_BATCH, 10);
         const uid = req.actor.id;
 
-        const [mSnap, bSnap] = await Promise.all([
+        const [mSnap, bSnap, pSnap] = await Promise.all([
             mistakesCol(uid).where('topicId', '==', topicId).limit(100).get(),
             getDb()
                 .collection('questions')
@@ -299,10 +303,20 @@ router.get(
                 .where('topicId', '==', topicId)
                 .where('reviewStatus', '==', 'approved')
                 .limit(100)
+                .get(),
+            // Câu AI tạo riêng để luyện phần yếu (chưa duyệt): vẫn cho luyện, giao diện có nhãn "chưa duyệt"
+            getDb()
+                .collection('questions')
+                .where('ownerId', '==', uid)
+                .where('topicId', '==', topicId)
+                .where('origin', '==', 'ai-practice')
+                .limit(50)
                 .get()
         ]);
         const mistakes = mSnap.docs.map((d) => d.data());
-        const bank = bSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((q) => q.type !== 'short'); // câu trả lời ngắn không tự chấm được
+        const bankById = new Map(); // câu đã duyệt đồng thời là câu ai-practice thì chỉ lấy một lần
+        for (const d of [...bSnap.docs, ...pSnap.docs]) bankById.set(d.id, { id: d.id, ...d.data() });
+        const bank = [...bankById.values()].filter((q) => q.type !== 'short'); // câu trả lời ngắn không tự chấm được
 
         const picked = pickPractice(mistakes, bank, limit);
         res.status(200).json({
@@ -310,6 +324,85 @@ router.get(
             serverNow: new Date().toISOString(),
             questions: picked.map((p) => (p.kind === 'mistake' ? toReviewQuestion(p.doc) : toPracticeQuestion(p.q)))
         });
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tạo câu luyện bằng AI từ câu từng sai (POST /review/practice/generate { topicId, count }).
+// Tốn AI credits (1 credit = 1 câu, giữ chỗ trước, hoàn phần không dùng). Worker tra ngược đoạn tài liệu nguồn của các câu sai rồi nhờ AI soạn câu MỚI (worker/generatePractice.js).
+// Trả jobId để giao diện hỏi tiến độ bằng GET /questions/jobs/:jobId; xong thì GET /review/practice sẽ có thêm các câu mới.
+// ---------------------------------------------------------------------------
+const practiceGenerateSchema = z
+    .object({
+        topicId: z.string().regex(idPattern),
+        count: z.number().int().min(1).max(MAX_PRACTICE_COUNT).default(5)
+    })
+    .strict();
+
+const MAX_ACTIVE_PRACTICE_JOBS = 1; // mỗi người chỉ một job tạo câu luyện chạy cùng lúc
+
+router.post(
+    '/practice/generate',
+    userOnly,
+    actorLimit('review-practice-generate', 5),
+    async (req, res) => {
+        const parsed = practiceGenerateSchema.safeParse(req.body);
+        if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+
+        const uid = req.actor.id;
+        const { topicId } = parsed.data;
+        const plan = getPlan(req.profile.plan);
+        const count = Math.min(parsed.data.count, plan.maxQuestionsPerJob);
+        const db = getDb();
+
+        const topicSnap = await db.collection('topics').doc(topicId).get();
+        if (!topicSnap.exists) return fail(res, 404, 'Không tìm thấy chủ đề');
+
+        // Phải có câu sai ở chủ đề này làm căn cứ (không có thì không tốn credits cho một job chắc chắn thất bại)
+        const mistakeCount = await countOf(mistakesCol(uid).where('topicId', '==', topicId));
+        if (mistakeCount === 0) return fail(res, 409, 'Chủ đề này chưa có câu sai nào để làm căn cứ tạo câu luyện', 'no-mistakes');
+
+        const active = await db.collection('jobs').where('ownerId', '==', uid).where('status', 'in', ['queued', 'running']).limit(20).get();
+        if (active.docs.filter((d) => d.data().type === 'generate_practice').length >= MAX_ACTIVE_PRACTICE_JOBS) {
+            return fail(res, 429, 'Đang có job tạo câu luyện chạy, vui lòng chờ xong', 'too-many-jobs');
+        }
+
+        const jobRef = db.collection('jobs').doc();
+        const period = currentPeriod();
+        try {
+            await reserveCredits({
+                uid,
+                jobId: jobRef.id,
+                amount: count,
+                limit: creditLimits(plan),
+                writes: (tx) =>
+                    tx.set(jobRef, {
+                        type: 'generate_practice',
+                        ownerId: uid,
+                        topicId,
+                        count,
+                        types: ['single'], // V1: chỉ trắc nghiệm 4 lựa chọn (dễ kiểm tra, chấm tự động)
+                        credits: { period, reserved: count },
+                        status: 'queued',
+                        attempts: 0,
+                        maxAttempts: 3,
+                        progress: { done: 0, total: 1 },
+                        error: null,
+                        deadLetter: false,
+                        runAfter: FieldValue.serverTimestamp(),
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp()
+                    })
+            });
+        } catch (err) {
+            if (err instanceof QuotaError) {
+                return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
+            }
+            throw err;
+        }
+
+        wakeWorker();
+        res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { period, reserved: count } });
     }
 );
 
@@ -325,7 +418,8 @@ async function loadBank(uid, ids) {
     qSnaps.forEach((s, i) => {
         if (!s.exists || !kSnaps[i].exists) return;
         const q = s.data();
-        if (q.ownerId !== uid || q.reviewStatus !== 'approved' || q.type === 'short' || !q.topicId) return;
+        const usable = q.reviewStatus === 'approved' || q.origin === 'ai-practice';
+        if (q.ownerId !== uid || !usable || q.type === 'short' || !q.topicId) return;
         out.set(s.id, { q, key: kSnaps[i].data() });
     });
     return out;

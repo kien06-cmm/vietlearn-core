@@ -377,6 +377,13 @@ export function getPracticeQuestions(token, { topicId, limit = 10 }) {
   return request(`/review/practice?topicId=${encodeURIComponent(topicId)}&limit=${limit}`, { token })
 }
 
+// Nhờ AI soạn câu luyện mới từ các câu từng sai của chủ đề (bám đoạn tài liệu nguồn). Tốn AI credits: 1 credit = 1 câu, hoàn phần không dùng.
+// -> { jobId, credits } rồi hỏi tiến độ bằng getJob(token, jobId); job xong thì getPracticeQuestions có thêm câu mới (câu có unreviewed: true).
+// Lỗi: 402 code 'quota-credits' (hết credits, có resetsAt), 409 'no-mistakes' (chưa có câu sai ở chủ đề), 429 'too-many-jobs'.
+export function generatePractice(token, { topicId, count = 5 }) {
+  return request('/review/practice/generate', { token, method: 'POST', body: { topicId, count } })
+}
+
 // Bản đồ kiến thức: mức thành thạo từng chủ đề, tính trên 30 câu gần nhất (cần ≥ 5 câu mới xếp loại)
 // -> { map: [{ subject, percent, level, sample, chapters: [{ chapter, percent, level, sample, topics: [{ topicId, name, percent, level: 'new' | 'weak' | 'learning' | 'strong', sample, answered, lastAt }] }] }],
 //      weakest: [topic yếu nhất], counts: { new, weak, learning, strong } }

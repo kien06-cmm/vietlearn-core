@@ -46,8 +46,13 @@ test('không có câu sai thì toàn bộ là câu ngân hàng; không vượt l
 
 test('câu gửi đi luyện không lộ đáp án, giải thích hay nguồn', () => {
     const q = toPracticeQuestion(b('b1'));
-    assert.deepEqual(Object.keys(q).sort(), ['fresh', 'id', 'options', 'stage', 'stem', 'topicId', 'type']);
+    assert.deepEqual(Object.keys(q).sort(), ['fresh', 'id', 'options', 'stage', 'stem', 'topicId', 'type', 'unreviewed']);
     assert.equal(JSON.stringify(q).includes('bí mật'), false);
     assert.deepEqual(q.options[1], { index: 1, text: 'B' });
     assert.equal(q.fresh, true);
+});
+
+test('câu AI tạo để luyện (chưa duyệt) được đánh dấu unreviewed, câu đã duyệt thì không', () => {
+    assert.equal(toPracticeQuestion({ ...b('b1'), reviewStatus: 'draft', origin: 'ai-practice' }).unreviewed, true);
+    assert.equal(toPracticeQuestion({ ...b('b1'), reviewStatus: 'approved' }).unreviewed, false);
 });

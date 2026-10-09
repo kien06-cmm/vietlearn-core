@@ -1,7 +1,7 @@
 // Chức năng: trang Ôn tập (Phase 5) - hôm nay cần ôn bao nhiêu câu, làm bài ôn từng câu (có phản hồi ngay, cập nhật lịch 1 -> 3 -> 7 ngày), và Sổ lỗi sai (đáp án đúng, gợi ý kiểu sai, đáp án hay chọn nhầm).
 // Câu sai ở bài làm bình thường tự vào sổ khi nộp bài (chỉ tài khoản). Đáp án đúng chỉ hiện sau khi bạn đã trả lời câu đó.
-import { useCallback, useEffect, useState } from 'react'
-import { getPracticeQuestions, getReviewQuestions, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { generatePractice, getJob, getPracticeQuestions, getReviewQuestions, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
 import { CONFIDENCE_LEVELS, ERROR_LABELS, ERROR_TYPES, LETTERS, isAnswered, tfText } from '../services/attemptText.js'
 import { QuestionInput } from '../components/AttemptRunner.jsx'
 import { ReviewBody } from '../components/AttemptResult.jsx'
@@ -16,6 +16,62 @@ import './Review.css'
 
 const SESSION_SIZE = 10
 const INTERVAL_TEXT = ['1 ngày', '3 ngày', '7 ngày'] // khớp REVIEW_INTERVALS_DAYS ở backend
+const AI_PRACTICE_COUNT = 5
+const AI_POLL_MS = 2000
+const AI_POLL_MAX = 60 // chờ tối đa ~2 phút; job vẫn chạy tiếp phía server nên câu mới sẽ có ở lần luyện sau
+
+// Nhờ AI soạn thêm câu luyện cho chủ đề từ các câu bạn từng sai (bám đoạn tài liệu gốc). Tốn AI credits nên chỉ chạy khi bấm nút.
+function AiPractice({ getToken, topic, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const alive = useRef(true)
+
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+
+  async function start() {
+    setBusy(true)
+    setError('')
+    try {
+      const { jobId } = await generatePractice(await getToken(), { topicId: topic.id, count: AI_PRACTICE_COUNT })
+      for (let i = 0; i < AI_POLL_MAX; i++) {
+        await new Promise((resolve) => setTimeout(resolve, AI_POLL_MS))
+        if (!alive.current) return
+        const { job } = await getJob(await getToken(), jobId)
+        if (job.status === 'done') {
+          onDone()
+          return
+        }
+        if (job.status === 'failed') throw new Error(job.error || 'AI chưa tạo được câu luyện. Credits đã được hoàn lại.')
+      }
+      throw new Error('AI đang tạo lâu hơn dự kiến. Câu mới sẽ có trong lần luyện sau, bạn không cần bấm lại.')
+    } catch (err) {
+      if (alive.current) setError(err.message)
+    } finally {
+      if (alive.current) setBusy(false)
+    }
+  }
+
+  return (
+    <div className="ai-practice">
+      <p className="hint">
+        Muốn thêm câu mới? AI sẽ soạn {AI_PRACTICE_COUNT} câu từ đúng đoạn tài liệu của những câu bạn từng sai ở chủ đề này. Tốn tối đa {AI_PRACTICE_COUNT} AI credits, phần không dùng được hoàn lại. Câu AI tạo chưa được duyệt nên sẽ có nhãn.
+      </p>
+      {error && (
+        <p className="msg msg-error" role="alert">
+          {error}
+        </p>
+      )}
+      <button className="btn btn-secondary" disabled={busy} onClick={start}>
+        {busy ? 'Đang tạo câu luyện...' : 'Tạo thêm câu luyện bằng AI'}
+      </button>
+    </div>
+  )
+}
 
 // "Ôn lại sau 2 ngày" / "Đã đến hạn ôn". nowMs lấy từ giờ server để không lệch theo đồng hồ máy.
 function dueText(iso, nowMs) {
@@ -47,6 +103,19 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
   const [feedback, setFeedback] = useState(null) // kết quả chấm của câu đang xem
   const [busy, setBusy] = useState(false)
   const [tally, setTally] = useState({ correct: 0, wrong: 0, mastered: 0 })
+  const [reloadKey, setReloadKey] = useState(0) // đổi giá trị này thì tải lại bộ câu từ đầu
+
+  // AI vừa tạo xong câu luyện mới: tải lại bộ câu (câu mới nằm trong bộ này)
+  function reloadAfterGenerate() {
+    setQuestions(null)
+    setIndex(0)
+    setAnswer(null)
+    setLevel(null)
+    setFeedback(null)
+    setError('')
+    setTally({ correct: 0, wrong: 0, mastered: 0 })
+    setReloadKey((k) => k + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -64,7 +133,7 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
     return () => {
       cancelled = true
     }
-  }, [getToken, scope, topic])
+  }, [getToken, scope, topic, reloadKey])
 
   if (error && !questions) {
     return (
@@ -111,6 +180,7 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
           {tally.mastered > 0 && <span className="chip">Đã nắm {tally.mastered}</span>}
         </div>
         <p className="hint">Câu sai sẽ quay lại sau 1 ngày. Câu đúng được hẹn lần ôn xa hơn.</p>
+        {topic && <AiPractice getToken={getToken} topic={topic} onDone={reloadAfterGenerate} />}
         <button className="btn btn-primary" onClick={onDone}>
           {backText}
         </button>
@@ -166,12 +236,15 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
         <div className="q-top">
           <span className="badge">{TYPE_LABELS[q.type] || q.type}</span>
           <span className="badge">
-            {q.fresh ? 'Câu từ ngân hàng' : q.stage < INTERVAL_TEXT.length ? `Lần ôn thứ ${q.stage + 1}` : 'Ôn lại câu đã nắm'}
+            {q.fresh ? (q.unreviewed ? 'Câu AI tạo, chưa duyệt' : 'Câu từ ngân hàng') : q.stage < INTERVAL_TEXT.length ? `Lần ôn thứ ${q.stage + 1}` : 'Ôn lại câu đã nắm'}
           </span>
         </div>
         <p className="q-stem">
           <MathText text={q.stem} />
         </p>
+        {q.unreviewed && (
+          <p className="hint">Câu này do AI soạn từ tài liệu của bạn và chưa được duyệt. Nếu thấy đáp án có vẻ sai, hãy kiểm tra lại ở mục Câu hỏi.</p>
+        )}
 
         {!feedback && (
           <>

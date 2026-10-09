@@ -9,6 +9,7 @@ import { buildChunks } from './text.js';
 import { AIError } from '../ai/provider.js';
 import { settleCredits } from '../credits.js';
 import { processGenerateQuestions } from './generateQuestions.js';
+import { processGeneratePractice } from './generatePractice.js';
 
 const NOT_FOUND = 5; // mã lỗi gRPC khi document không còn tồn tại
 const PROGRESS_EVERY = 5; // ghi tiến độ mỗi 5 trang (tiết kiệm lượt ghi Firestore)
@@ -235,7 +236,8 @@ async function processExtractDocument(job) {
 // Bảng điều phối: thêm loại job mới (vd generate_questions) bằng cách thêm một dòng ở đây
 const HANDLERS = {
     extract_document: processExtractDocument,
-    generate_questions: processGenerateQuestions
+    generate_questions: processGenerateQuestions,
+    generate_practice: processGeneratePractice
 };
 
 export async function processJob(job) {
