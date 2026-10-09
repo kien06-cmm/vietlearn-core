@@ -150,7 +150,7 @@ export default function ImportQuestions({ getToken, topics, onTopicCreated, onIm
     <section className="card">
       <h2>Nhập đề có sẵn</h2>
       <p className="hint">
-        Nhập đề trắc nghiệm 4 lựa chọn từ file Excel, Word hoặc TXT. Không tốn AI credits. Các câu nhập vào ở trạng thái nháp để bạn duyệt.
+        Nhập đề trắc nghiệm 4 lựa chọn từ file Excel, Word hoặc TXT. Không tốn AI credits. Các câu nhập vào ở trạng thái nháp để bạn duyệt. Mỗi lần nhập tối đa 20 câu (gói Free) hoặc 200 câu (gói Pro).
       </p>
 
       <div className="doc-actions">
@@ -218,7 +218,7 @@ export default function ImportQuestions({ getToken, topics, onTopicCreated, onIm
         )}
 
         <label>
-          File đề (.xlsx, .docx, .txt - tối đa 2 MB, 200 câu)
+          File đề (.xlsx, .docx, .txt - tối đa 2 MB)
           <input
             key={fileKey}
             type="file"
@@ -252,7 +252,7 @@ export default function ImportQuestions({ getToken, topics, onTopicCreated, onIm
       {d && (
         <div className="upload-state">
           <p className="hint">
-            Đọc được {d.found} câu · hợp lệ {d.valid} · bỏ qua {d.skipped}
+            Đọc được {d.found} câu · hợp lệ {d.valid} · bỏ qua {d.skipped} · giới hạn gói của bạn {d.limit} câu/lần
           </p>
 
           {d.preview.length > 0 && (

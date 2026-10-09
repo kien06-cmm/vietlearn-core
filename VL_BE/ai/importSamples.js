@@ -74,7 +74,7 @@ async function buildXlsx() {
         'Mỗi dòng là một câu hỏi gồm đủ 4 lựa chọn A, B, C, D và đúng 1 đáp án.',
         'Cột "Đáp án" chỉ ghi một chữ: A, B, C hoặc D. Cột "Giải thích" có thể để trống.',
         'Công thức toán, lý, hóa viết trong dấu đô la, ví dụ: $x^2 + 2x + 1 = 0$.',
-        'Mỗi lần nhập tối đa 200 câu, file tối đa 2 MB. Hệ thống chỉ đọc trang đầu tiên.'
+        'Mỗi lần nhập tối đa 20 câu (gói Free) hoặc 200 câu (gói Pro), file tối đa 2 MB. Hệ thống chỉ đọc trang đầu tiên.'
     ].forEach((line, i) => {
         const row = guide.addRow([line]);
         row.alignment = { wrapText: true, vertical: 'top' };

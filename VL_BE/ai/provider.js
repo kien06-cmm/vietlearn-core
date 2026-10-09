@@ -78,10 +78,24 @@ async function gemini({ system, prompt, temperature, maxOutputTokens }) {
 
 const PROVIDERS = { gemini };
 
+// Ghi log mỗi lần gọi AI (số request, token, lỗi) để theo dõi chi phí và quota. Không ghi nội dung prompt hay key.
+function log(level, message, extra = {}) {
+    console.log(JSON.stringify({ time: new Date().toISOString(), level, scope: 'ai', message, ...extra }));
+}
+
 // Gọi AI, trả JSON. Kết quả: { data, usage: { inputTokens, outputTokens } }
 export async function generateJson({ system = '', prompt, temperature = 0.4, maxOutputTokens = 4096 }) {
     const name = process.env.AI_PROVIDER || 'gemini';
     const provider = PROVIDERS[name];
     if (!provider) throw new AIError(`Nhà cung cấp AI không hỗ trợ: ${name}`, { code: 'ai-provider' });
-    return provider({ system, prompt, temperature, maxOutputTokens });
+
+    const started = Date.now();
+    try {
+        const result = await provider({ system, prompt, temperature, maxOutputTokens });
+        log('info', 'Gọi AI thành công', { provider: name, ms: Date.now() - started, ...result.usage });
+        return result;
+    } catch (err) {
+        log('warn', 'Gọi AI lỗi', { provider: name, ms: Date.now() - started, code: err.code || 'unknown', retryable: !!err.retryable });
+        throw err;
+    }
 }

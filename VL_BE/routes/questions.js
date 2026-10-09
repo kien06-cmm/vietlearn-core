@@ -204,6 +204,7 @@ router.post('/import', importLimiter, userOnly, async (req, res) => {
     if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
     const { fileName, fileBase64, topicId, confirm } = parsed.data;
     const uid = req.actor.id;
+    const maxQuestions = getPlan(req.profile.plan).maxImportQuestions; // Free 20, Pro 200 câu mỗi lần nhập
     const db = getDb();
 
     const topicSnap = await db.collection('topics').doc(topicId).get();
@@ -220,9 +221,10 @@ router.post('/import', importLimiter, userOnly, async (req, res) => {
     // Loại câu trùng với kho của chính người dùng (cũng chặn bấm xác nhận hai lần tạo câu trùng)
     const existing = await questions().where('ownerId', '==', uid).limit(300).get();
     const { questions: valid, errors } = finalizeImport(items, {
-        seenKeys: existing.docs.map((d) => stemKey(d.data().stem))
+        seenKeys: existing.docs.map((d) => stemKey(d.data().stem)),
+        maxQuestions
     });
-    const summary = { found: items.length, valid: valid.length, skipped: errors.length, errors: errors.slice(0, 100) };
+    const summary = { found: items.length, valid: valid.length, skipped: errors.length, limit: maxQuestions, errors: errors.slice(0, 100) };
 
     if (!confirm) {
         return res.status(200).json({
