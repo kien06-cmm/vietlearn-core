@@ -33,15 +33,16 @@ export const CONFIDENCE_LABELS = Object.fromEntries(CONFIDENCE_LEVELS.map((c) =>
 
 export const timeText = (d) => d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
-// Gợi ý kiểu sai (Phase 5). Backend phân loại theo luật cố định nên chỉ là gợi ý, không phải kết luận.
-// label: nhãn ngắn trên huy hiệu; hint: lý do gợi ý + việc nên làm
+// Gợi ý kiểu sai (Phase 5). Backend phân loại theo luật cố định dựa trên mức tự tin, thời gian làm, số lần đổi đáp án và lịch sử câu này, nên chỉ là gợi ý, không phải kết luận.
+// Khi không có tín hiệu nào thì backend trả 'unknown' thay vì đoán. label: nhãn ngắn trên huy hiệu; hint: dấu hiệu dẫn đến gợi ý + việc nên làm
 export const ERROR_TYPES = [
-  { value: 'misconception', label: 'Có thể hiểu nhầm', hint: 'Bạn chọn “Chắc chắn” nhưng sai. Nên xem lại cách hiểu khái niệm này.' },
-  { value: 'knowledge', label: 'Có thể thiếu kiến thức', hint: 'Sai và không có dấu hiệu đoán hay làm vội. Nên ôn lại phần lý thuyết liên quan.' },
+  { value: 'misconception', label: 'Có thể hiểu nhầm', hint: 'Bạn đã chọn “Chắc chắn” hoặc chọn lại đúng đáp án sai từng chọn, nên nhiều khả năng đang hiểu khác với đáp án đúng. Đọc phần giải thích và so với cách bạn nghĩ.' },
+  { value: 'knowledge', label: 'Có thể chưa nắm kiến thức', hint: 'Bạn thấy phân vân, nghĩ khá lâu hoặc đã sai câu này nhiều lần. Nên ôn lại phần lý thuyết của chủ đề này.' },
   { value: 'guess', label: 'Có thể do đoán', hint: 'Bạn đánh dấu “Đoán”. Câu này chưa nắm, nên học lại trước khi làm tiếp.' },
-  { value: 'careless', label: 'Có thể do ẩu', hint: 'Bạn trả lời rất nhanh (dưới 3 giây). Thử đọc kỹ đề và các lựa chọn hơn.' },
-  { value: 'changed', label: 'Có thể do đổi đáp án', hint: 'Bạn đã đổi đáp án rồi sai. Lần sau hãy tin vào cách làm đã cân nhắc kỹ.' },
+  { value: 'careless', label: 'Có thể do ẩu', hint: 'Bạn trả lời nhanh hơn thời gian đọc đề thông thường. Thử đọc kỹ đề và từng lựa chọn trước khi trả lời.' },
+  { value: 'changed', label: 'Có thể do lưỡng lự', hint: 'Bạn đổi đáp án nhiều lần trước khi nộp, dấu hiệu chưa chắc về khái niệm. Thử nêu lý do chọn đáp án thay vì đổi theo cảm giác.' },
   { value: 'timeout', label: 'Hết giờ', hint: 'Câu này còn bỏ trống khi hết giờ. Thử chia thời gian đều hơn giữa các câu.' },
+  { value: 'unknown', label: 'Chưa rõ nguyên nhân', hint: 'Chưa đủ dữ liệu để gợi ý nguyên nhân. Lần sau hãy chọn mức tự tin (Chắc chắn / Phân vân / Đoán) để hệ thống gợi ý chính xác hơn.' },
 ]
 
 export const ERROR_LABELS = Object.fromEntries(ERROR_TYPES.map((e) => [e.value, e.label]))

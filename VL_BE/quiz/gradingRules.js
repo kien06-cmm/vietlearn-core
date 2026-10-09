@@ -8,8 +8,11 @@ export const EVENT_TYPES = ['tab_hidden', 'tab_visible', 'window_blur', 'window_
 export const CONFIDENCE_LEVELS = ['sure', 'unsure', 'guess'];
 export const MAX_CHANGES = 50;
 export const MAX_SPENT_MS = 3_600_000; // thời gian tối đa ghi cho một câu: 1 giờ
-export const CARELESS_MS = 3000; // sai mà trả lời dưới 3 giây thì gợi ý là ẩu
-export const ERROR_TYPES = ['timeout', 'guess', 'careless', 'changed', 'misconception', 'knowledge'];
+export const CARELESS_MS = 3000; // ngưỡng tối thiểu: trả lời dưới 3 giây mà sai thì gợi ý là ẩu (đề dài thì ngưỡng cao hơn, xem carelessLimitMs)
+export const CARELESS_MAX_MS = 10_000; // ngưỡng ẩu tối đa
+export const LONG_THINK_MS = 25_000; // nghĩ từ 25 giây mà vẫn sai là dấu hiệu chưa nắm kiến thức
+export const CHANGED_MIN = 2; // đổi đáp án từ 2 lần trở lên mới coi là lưỡng lự (1 lần là bình thường)
+export const ERROR_TYPES = ['timeout', 'guess', 'careless', 'changed', 'misconception', 'knowledge', 'unknown'];
 export const MAX_FILL_CHARS = 200;
 export const MAX_SHORT_CHARS = 300;
 
@@ -361,17 +364,32 @@ export function mergeSpent(saved, patch) {
     return out;
 }
 
-// Gợi ý kiểu sai cho MỘT câu theo luật cố định. Thứ tự ưu tiên: hết giờ, đoán, ẩu, đổi đáp án, hiểu nhầm, thiếu kiến thức.
+// Thời gian tối thiểu để đọc đề: khoảng nửa thời gian đọc kỹ (~17 ký tự/giây), từ 3 đến 10 giây. Trả lời nhanh hơn mà sai thì gợi ý là ẩu.
+export function carelessLimitMs(textLength = 0) {
+    return Math.min(Math.max(Math.round((textLength / 34) * 1000), CARELESS_MS), CARELESS_MAX_MS);
+}
+
+// Độ dài đề + các lựa chọn (đáp án là chuỗi hoặc { text })
+export function textLengthOf(q) {
+    const opts = (q?.options || []).reduce((n, o) => n + String(typeof o === 'string' ? o : (o?.text ?? '')).length, 0);
+    return String(q?.stem ?? '').length + opts;
+}
+
+// Gợi ý kiểu sai cho MỘT câu theo luật cố định. Chỉ gợi ý khi CÓ TÍN HIỆU; không có thì trả 'unknown' chứ không đoán.
+// Thứ tự ưu tiên: hết giờ, đoán (người học tự đánh dấu), ẩu (trả lời nhanh hơn thời gian đọc đề, trừ khi đã chọn "Chắc chắn"),
+// hiểu nhầm ("Chắc chắn" mà sai), lưỡng lự (đổi đáp án từ 2 lần), thiếu kiến thức ("Phân vân" hoặc nghĩ lâu mà vẫn sai), còn lại là chưa rõ.
 // Trả null nếu không phải lỗi (đúng, tự đối chiếu) hoặc bỏ trống mà không phải do hết giờ.
-export function classifyError({ status, type, confidence, changes = 0, spentMs = null, submitReason = null }) {
+export function classifyError({ status, type, confidence, changes = 0, spentMs = null, submitReason = null, textLength = 0 }) {
     if (type === 'short' || status === 'correct' || status === 'pending') return null;
     if (status === 'unanswered') return submitReason === 'timeout' || submitReason === 'room-ended' ? 'timeout' : null;
     if (status !== 'wrong') return null;
     if (confidence === 'guess') return 'guess';
-    if (spentMs != null && spentMs < CARELESS_MS) return 'careless';
-    if (changes > 0) return 'changed';
+    if (confidence !== 'sure' && spentMs != null && spentMs < carelessLimitMs(textLength)) return 'careless';
     if (confidence === 'sure') return 'misconception';
-    return 'knowledge';
+    if (changes >= CHANGED_MIN) return 'changed';
+    if (confidence === 'unsure') return 'knowledge';
+    if (spentMs != null && spentMs >= LONG_THINK_MS) return 'knowledge';
+    return 'unknown';
 }
 
 // Phân loại cả lượt làm: { byQuestion: { [id]: loại }, summary: { [loại]: số câu } }
@@ -385,7 +403,8 @@ export function classifyErrors({ questions, statuses, confidence, changes, spent
             confidence: confidence?.[q.id],
             changes: changes?.[q.id] || 0,
             spentMs: spent?.[q.id] ?? null,
-            submitReason
+            submitReason,
+            textLength: textLengthOf(q)
         });
         if (!t) continue;
         byQuestion[q.id] = t;

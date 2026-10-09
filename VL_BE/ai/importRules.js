@@ -243,7 +243,7 @@ export function parseQuestionRows(rows) {
 // Kiểm tra cuối: luật chung (parseQuestion), loại trùng, giới hạn số câu
 // items: kết quả của parseQuestionText / parseQuestionRows. seenKeys: khóa đề đã có trong kho của người dùng.
 // ---------------------------------------------------------------------------
-export function finalizeImport(items, { seenKeys = [] } = {}) {
+export function finalizeImport(items, { seenKeys = [], maxQuestions = MAX_IMPORT_QUESTIONS } = {}) {
     const questions = [];
     const errors = [];
     const seen = [...seenKeys];
@@ -264,7 +264,7 @@ export function finalizeImport(items, { seenKeys = [] } = {}) {
             errors.push({ where: it.label, message: 'Trùng với một câu đã có trong kho hoặc trong file' });
             continue;
         }
-        if (questions.length >= MAX_IMPORT_QUESTIONS) {
+        if (questions.length >= maxQuestions) {
             overLimit++;
             continue;
         }
@@ -272,7 +272,7 @@ export function finalizeImport(items, { seenKeys = [] } = {}) {
         questions.push({ label: it.label, q: parsed.q });
     }
     if (overLimit) {
-        errors.push({ where: 'File', message: `Vượt giới hạn ${MAX_IMPORT_QUESTIONS} câu mỗi lần nhập, ${overLimit} câu cuối chưa được nhập` });
+        errors.push({ where: 'File', message: `Vượt giới hạn ${maxQuestions} câu mỗi lần nhập, ${overLimit} câu cuối chưa được nhập` });
     }
     return { questions, errors };
 }

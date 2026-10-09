@@ -9,7 +9,7 @@ export const GUESS_WEIGHT = 0.5; // đoán trúng chưa chắc đã nắm nên c
 export const WEAK_BELOW = 0.5; // dưới 50%: cần luyện
 export const STRONG_FROM = 0.8; // từ 80%: vững
 
-const UNKNOWN_SUBJECT = 'Chưa phân loại';
+export const UNKNOWN_SUBJECT = 'Chưa phân loại';
 const UNKNOWN_CHAPTER = 'Chưa rõ chương';
 const cmp = (a, b) => a.localeCompare(b, 'vi');
 

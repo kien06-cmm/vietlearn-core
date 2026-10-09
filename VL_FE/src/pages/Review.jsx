@@ -1,7 +1,7 @@
 // Chức năng: trang Ôn tập (Phase 5) - hôm nay cần ôn bao nhiêu câu, làm bài ôn từng câu (có phản hồi ngay, cập nhật lịch 1 -> 3 -> 7 ngày), và Sổ lỗi sai (đáp án đúng, gợi ý kiểu sai, đáp án hay chọn nhầm).
 // Câu sai ở bài làm bình thường tự vào sổ khi nộp bài (chỉ tài khoản). Đáp án đúng chỉ hiện sau khi bạn đã trả lời câu đó.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { generatePractice, getJob, getPracticeQuestions, getReviewQuestions, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
+import { generatePractice, getJob, getPracticeQuestions, getReviewQuestions, getReviewSubjects, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
 import { CONFIDENCE_LEVELS, ERROR_LABELS, ERROR_TYPES, LETTERS, isAnswered, tfText } from '../services/attemptText.js'
 import { QuestionInput } from '../components/AttemptRunner.jsx'
 import { ReviewBody } from '../components/AttemptResult.jsx'
@@ -92,8 +92,9 @@ function nextText(f) {
 // ---------------------------------------------------------------------------
 // Làm bài ôn: mỗi lần một câu, chấm ngay để có phản hồi, lịch ôn được cập nhật ở server
 // topic ({ id, name }): luyện phần yếu của một chủ đề thay vì ôn theo lịch
+// subject: chỉ ôn câu của môn đó (chuỗi rỗng = tất cả các môn); không dùng khi đang luyện một chủ đề
 // ---------------------------------------------------------------------------
-function ReviewSession({ getToken, scope, topic, onDone }) {
+function ReviewSession({ getToken, scope, subject, topic, onDone }) {
   const backText = topic ? 'Về Bản đồ kiến thức' : 'Về Ôn tập'
   const [questions, setQuestions] = useState(null) // null: đang tải
   const [error, setError] = useState('')
@@ -124,7 +125,7 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
         const token = await getToken()
         const res = topic
           ? await getPracticeQuestions(token, { topicId: topic.id, limit: SESSION_SIZE })
-          : await getReviewQuestions(token, { scope, limit: SESSION_SIZE })
+          : await getReviewQuestions(token, { scope, limit: SESSION_SIZE, subject })
         if (!cancelled) setQuestions(res.questions)
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -133,7 +134,7 @@ function ReviewSession({ getToken, scope, topic, onDone }) {
     return () => {
       cancelled = true
     }
-  }, [getToken, scope, topic, reloadKey])
+  }, [getToken, scope, subject, topic, reloadKey])
 
   if (error && !questions) {
     return (
@@ -494,11 +495,16 @@ export default function Review({ getToken }) {
   const [scope, setScope] = useState('due')
   const [practice, setPractice] = useState(null) // { id, name }: đang luyện phần yếu của một chủ đề (bắt đầu từ Bản đồ kiến thức)
   const [summary, setSummary] = useState(null) // null: đang tải
+  const [subjects, setSubjects] = useState([]) // các môn có câu đang ôn: [{ subject, open, due }]
+  const [subject, setSubject] = useState('') // môn đang chọn ('' = tất cả)
   const [error, setError] = useState('')
 
   const loadSummary = useCallback(async () => {
     try {
-      setSummary(await getReviewSummary(await getToken()))
+      const token = await getToken()
+      const [sum, subj] = await Promise.all([getReviewSummary(token), getReviewSubjects(token)])
+      setSummary(sum)
+      setSubjects(subj.subjects)
       setError('')
     } catch (err) {
       setError(err.message)
@@ -516,7 +522,7 @@ export default function Review({ getToken }) {
     loadSummary()
   }
 
-  if (view === 'session') return <ReviewSession getToken={getToken} scope={scope} topic={practice} onDone={back} />
+  if (view === 'session') return <ReviewSession getToken={getToken} scope={scope} subject={subject} topic={practice} onDone={back} />
   if (view === 'notebook') return <Notebook getToken={getToken} onBack={back} />
   if (view === 'map') {
     return (
@@ -537,6 +543,10 @@ export default function Review({ getToken }) {
   }
 
   const nowMs = summary ? Date.parse(summary.serverNow) : 0
+  // Khi chọn môn thì đếm theo môn đó (môn hết câu đang ôn thì là 0)
+  const current = subject ? (subjects.find((s) => s.subject === subject) ?? { due: 0, open: 0 }) : null
+  const dueCount = current ? current.due : (summary?.due ?? 0)
+  const openCount = current ? current.open : (summary?.open ?? 0)
 
   return (
     <>
@@ -561,29 +571,48 @@ export default function Review({ getToken }) {
       {summary && (
         <section className="card review-today" aria-label="Hôm nay cần ôn">
           <p className="hero-label">Hôm nay</p>
+          {subjects.length > 1 && (
+            <div className="review-tabs" role="group" aria-label="Chọn môn để ôn">
+              <button className={`review-tab${subject === '' ? ' review-tab-on' : ''}`} aria-pressed={subject === ''} onClick={() => setSubject('')}>
+                Tất cả ({summary.due})
+              </button>
+              {subjects.map((s) => (
+                <button
+                  key={s.subject}
+                  className={`review-tab${subject === s.subject ? ' review-tab-on' : ''}`}
+                  aria-pressed={subject === s.subject}
+                  onClick={() => setSubject(s.subject)}
+                >
+                  {s.subject} ({s.due})
+                </button>
+              ))}
+            </div>
+          )}
           <p className="review-count">
-            <span>{summary.due}</span> câu cần ôn
+            <span>{dueCount}</span> câu cần ôn
           </p>
-          {summary.due === 0 && (
+          {dueCount === 0 && (
             <p className="hint">
-              {summary.open === 0
+              {openCount === 0
                 ? 'Chưa có câu nào trong sổ lỗi sai. Làm quiz xong, những câu sai sẽ được thêm vào đây.'
-                : summary.nextDueAt
-                  ? `Câu tiếp theo: ${dueText(summary.nextDueAt, nowMs).toLowerCase()}.`
-                  : 'Chưa có câu nào đến hạn.'}
+                : current
+                  ? 'Môn này chưa có câu nào đến hạn.'
+                  : summary.nextDueAt
+                    ? `Câu tiếp theo: ${dueText(summary.nextDueAt, nowMs).toLowerCase()}.`
+                    : 'Chưa có câu nào đến hạn.'}
             </p>
           )}
           <div className="quiz-meta">
-            <span className="chip">Đang ôn {summary.open}</span>
-            <span className="chip">Đã nắm {summary.mastered}</span>
+            <span className="chip">Đang ôn {openCount}</span>
+            {!current && <span className="chip">Đã nắm {summary.mastered}</span>}
           </div>
           <div className="doc-actions">
-            {summary.due > 0 && (
+            {dueCount > 0 && (
               <button className="btn btn-primary" onClick={() => start('due')}>
-                Ôn {Math.min(summary.due, SESSION_SIZE)} câu hôm nay
+                Ôn {Math.min(dueCount, SESSION_SIZE)} câu hôm nay
               </button>
             )}
-            {summary.open > summary.due && (
+            {openCount > dueCount && (
               <button className="btn btn-secondary" onClick={() => start('open')}>
                 Ôn thêm cả câu chưa đến hạn
               </button>

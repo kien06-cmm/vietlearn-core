@@ -3,9 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     GRACE_MS,
+    LONG_THINK_MS,
     arrange,
     buildAttemptView,
     buildReview,
+    carelessLimitMs,
     classifyError,
     classifyErrors,
     cleanAnswer,
@@ -22,7 +24,8 @@ import {
     pruneConfidence,
     seededShuffle,
     summarizeConfidence,
-    summarizeTopics
+    summarizeTopics,
+    textLengthOf
 } from '../quiz/gradingRules.js';
 
 const questions = [
@@ -311,18 +314,52 @@ test('mergeSpent: giữ giá trị lớn hơn', () => {
     assert.deepEqual(mergeSpent({ q1: 5000, q2: 100 }, { q1: 3000, q2: 900, q3: 50 }), { q1: 5000, q2: 900, q3: 50 });
 });
 
-test('classifyError: thứ tự ưu tiên hết giờ, đoán, ẩu, đổi đáp án, hiểu nhầm, thiếu kiến thức', () => {
+test('classifyError: thứ tự ưu tiên hết giờ, đoán, ẩu, hiểu nhầm, lưỡng lự, thiếu kiến thức, chưa rõ', () => {
     const base = { status: 'wrong', type: 'single', confidence: null, changes: 0, spentMs: 20_000, submitReason: 'submitted' };
     assert.equal(classifyError({ ...base, status: 'unanswered', submitReason: 'timeout' }), 'timeout');
     assert.equal(classifyError({ ...base, status: 'unanswered', submitReason: 'room-ended' }), 'timeout');
     assert.equal(classifyError({ ...base, status: 'unanswered' }), null);
     assert.equal(classifyError({ ...base, confidence: 'guess', spentMs: 1000, changes: 2 }), 'guess');
-    assert.equal(classifyError({ ...base, spentMs: 2999, changes: 2, confidence: 'sure' }), 'careless');
-    assert.equal(classifyError({ ...base, spentMs: 3000 }), 'knowledge');
-    assert.equal(classifyError({ ...base, changes: 1, confidence: 'sure' }), 'changed');
+    assert.equal(classifyError({ ...base, spentMs: 2999, changes: 2, confidence: 'unsure' }), 'careless');
     assert.equal(classifyError({ ...base, confidence: 'sure' }), 'misconception');
+    assert.equal(classifyError({ ...base, changes: 2 }), 'changed');
     assert.equal(classifyError({ ...base, confidence: 'unsure' }), 'knowledge');
-    assert.equal(classifyError({ ...base, spentMs: null }), 'knowledge');
+});
+
+test('classifyError: "Chắc chắn" mà sai được coi là hiểu nhầm kể cả khi trả lời nhanh hoặc đổi đáp án', () => {
+    const base = { status: 'wrong', type: 'single', confidence: 'sure', changes: 0, spentMs: 20_000 };
+    assert.equal(classifyError({ ...base, spentMs: 1500 }), 'misconception');
+    assert.equal(classifyError({ ...base, changes: 3 }), 'misconception');
+});
+
+test('classifyError: không có tín hiệu nào thì trả "unknown", không đoán là thiếu kiến thức', () => {
+    const base = { status: 'wrong', type: 'single', confidence: null, changes: 0, spentMs: 20_000 };
+    assert.equal(classifyError(base), 'unknown');
+    assert.equal(classifyError({ ...base, spentMs: 3000 }), 'unknown');
+    assert.equal(classifyError({ ...base, spentMs: null }), 'unknown');
+    assert.equal(classifyError({ ...base, changes: 1 }), 'unknown'); // đổi đáp án 1 lần là bình thường
+});
+
+test('classifyError: nghĩ lâu mà vẫn sai là dấu hiệu thiếu kiến thức', () => {
+    const base = { status: 'wrong', type: 'single', confidence: null, changes: 0 };
+    assert.equal(classifyError({ ...base, spentMs: LONG_THINK_MS }), 'knowledge');
+    assert.equal(classifyError({ ...base, spentMs: LONG_THINK_MS - 1 }), 'unknown');
+});
+
+test('carelessLimitMs: đề càng dài thì ngưỡng ẩu càng cao, có sàn 3 giây và trần 10 giây', () => {
+    assert.equal(carelessLimitMs(0), 3000);
+    assert.equal(carelessLimitMs(50), 3000);
+    assert.equal(carelessLimitMs(300), 8824);
+    assert.equal(carelessLimitMs(5000), 10_000);
+    const base = { status: 'wrong', type: 'single', confidence: null, changes: 0, spentMs: 6000 };
+    assert.equal(classifyError({ ...base, textLength: 300 }), 'careless'); // 6 giây là quá nhanh cho đề 300 ký tự
+    assert.equal(classifyError({ ...base, textLength: 50 }), 'unknown'); // nhưng là bình thường cho đề ngắn
+});
+
+test('textLengthOf: tính cả đề và các lựa chọn, nhận cả chuỗi lẫn { text }', () => {
+    assert.equal(textLengthOf({ stem: 'abcd', options: ['ab', 'cde'] }), 9);
+    assert.equal(textLengthOf({ stem: 'abcd', options: [{ index: 0, text: 'ab' }] }), 6);
+    assert.equal(textLengthOf({}), 0);
 });
 
 test('classifyError: câu đúng, tự đối chiếu, trả lời ngắn không bị phân loại', () => {
@@ -346,6 +383,7 @@ test('classifyErrors: phân loại cả lượt và đếm theo loại', () => {
     assert.equal(out.summary.guess, 1);
     assert.equal(out.summary.timeout, 1);
     assert.equal(out.summary.knowledge, 0);
+    assert.equal(out.summary.unknown, 0);
 });
 
 test('bản xem lại có thời gian và gợi ý kiểu sai', () => {

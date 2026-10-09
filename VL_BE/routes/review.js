@@ -13,6 +13,8 @@ import {
     MAX_REVIEW_BATCH,
     applyReview,
     applyWrong,
+    filterBySubject,
+    subjectCounts,
     summarizeMistakes,
     toListItem,
     toReviewQuestion,
@@ -105,27 +107,53 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
+// Danh sách môn có câu đang ôn, kèm số câu đang ôn và số câu đã đến hạn (cho bộ lọc theo môn ở màn Ôn tập).
+// Môn lấy từ chủ đề của câu; câu không có chủ đề/môn vào "Chưa phân loại". Chỉ đọc tối đa MAX_MISTAKES_LIST câu đang ôn.
+// ---------------------------------------------------------------------------
+router.get(
+    '/subjects',
+    userOnly,
+    actorLimit('review-subjects', 30),
+    async (req, res) => {
+        const snap = await mistakesCol(req.actor.id).where('status', '==', 'open').limit(MAX_MISTAKES_LIST).get();
+        const docs = snap.docs.map((d) => d.data());
+        const topicNames = await loadTopicNames(docs.map((d) => d.topicId));
+        res.status(200).json({
+            status: 'success',
+            serverNow: new Date().toISOString(),
+            subjects: subjectCounts(docs, topicNames, Date.now())
+        });
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Lấy câu để ôn. scope=due (mặc định): chỉ câu đã đến hạn, câu quá hạn lâu nhất trước.
 // scope=open: ôn thêm cả câu chưa đến hạn, câu ở mốc thấp trước. Không có đáp án.
+// subject (tùy chọn): chỉ lấy câu của môn đó. Khi lọc theo môn phải đọc dư rồi lọc ở server (môn nằm ở chủ đề, không lưu trong câu sai).
 // ---------------------------------------------------------------------------
+const SUBJECT_SCAN = 200; // số câu tối đa đọc để lọc theo môn
+
 router.get(
     '/due',
     userOnly,
     actorLimit('review-due', 30),
     async (req, res) => {
         const limit = intParam(req.query.limit, 1, MAX_REVIEW_BATCH, 10);
+        const subject = typeof req.query.subject === 'string' ? req.query.subject.trim().slice(0, 100) : '';
+        const fetchLimit = subject ? SUBJECT_SCAN : limit;
         const col = mistakesCol(req.actor.id);
         let docs;
         if (req.query.scope === 'open') {
-            const snap = await col.where('status', '==', 'open').limit(100).get();
+            const snap = await col.where('status', '==', 'open').limit(subject ? SUBJECT_SCAN : 100).get();
             docs = snap.docs
                 .map((d) => d.data())
-                .sort((a, b) => (a.stage ?? 0) - (b.stage ?? 0) || (millisOf(a.nextReviewAt) ?? 0) - (millisOf(b.nextReviewAt) ?? 0))
-                .slice(0, limit);
+                .sort((a, b) => (a.stage ?? 0) - (b.stage ?? 0) || (millisOf(a.nextReviewAt) ?? 0) - (millisOf(b.nextReviewAt) ?? 0));
         } else {
-            const snap = await col.where('nextReviewAt', '<=', new Date()).orderBy('nextReviewAt').limit(limit).get();
+            const snap = await col.where('nextReviewAt', '<=', new Date()).orderBy('nextReviewAt').limit(fetchLimit).get();
             docs = snap.docs.map((d) => d.data());
         }
+        if (subject) docs = filterBySubject(docs, await loadTopicNames(docs.map((d) => d.topicId)), subject);
+        docs = docs.slice(0, limit);
         res.status(200).json({ status: 'success', serverNow: new Date().toISOString(), questions: docs.map(toReviewQuestion) });
     }
 );

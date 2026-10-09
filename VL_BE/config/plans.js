@@ -4,8 +4,8 @@
 const MB = 1024 * 1024;
 
 export const PLANS = {
-    free: { maxFileBytes: 10 * MB, maxDocuments: 20, maxPages: 100, aiCreditsPerDay: 10, maxQuestionsPerJob: 10 },
-    pro: { maxFileBytes: 50 * MB, maxDocuments: 200, maxPages: 500, aiCreditsPerDay: 60, maxQuestionsPerJob: 50 }
+    free: { maxFileBytes: 10 * MB, maxDocuments: 20, maxPages: 100, aiCreditsPerDay: 10, maxQuestionsPerJob: 10, maxImportQuestions: 20 },
+    pro: { maxFileBytes: 50 * MB, maxDocuments: 200, maxPages: 500, aiCreditsPerDay: 40, maxQuestionsPerJob: 40, maxImportQuestions: 200 }
 };
 
 // Hạn mức credits của một gói, dạng { daily, weekly } cho credits.js

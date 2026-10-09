@@ -1,5 +1,6 @@
 // Chức năng: luật thuần cho vòng lặp học tập (Phase 5) - sổ lỗi sai, đáp án nhiễu (người học hay chọn nhầm đáp án nào), lịch ôn 1 -> 3 -> 7 ngày điều chỉnh theo đúng/sai và mức tự tin. Không gọi mạng/DB nên dễ test.
 // Mỗi câu sai là một bản ghi users/{uid}/mistakes/{questionId}: chụp sẵn đề + đáp án đúng (chỉ backend đọc) để màn ôn tập không phải đọc thêm quiz/version.
+import { UNKNOWN_SUBJECT } from './masteryRules.js';
 
 export const REVIEW_INTERVALS_DAYS = [1, 3, 7]; // lịch ôn: sau 1 ngày, rồi 3 ngày, rồi 7 ngày
 export const MASTERED_STAGE = REVIEW_INTERVALS_DAYS.length; // qua hết các mốc thì coi là đã nắm
@@ -52,6 +53,23 @@ function addPicks(counts, picks) {
 }
 
 // ---------------------------------------------------------------------------
+// Tinh chỉnh kiểu sai bằng LỊCH SỬ của chính câu này (một lượt làm riêng lẻ không biết điều này):
+//  - chọn lại đúng đáp án sai đã từng chọn = dấu hiệu hiểu nhầm rõ nhất (trừ khi người học tự đánh dấu "Đoán" hoặc hết giờ)
+//  - sai lại một câu mà không có tín hiệu nào khác = dấu hiệu chưa nắm kiến thức
+// ---------------------------------------------------------------------------
+export function refineErrorType(prev, { errorType = null, picks = [] } = {}) {
+    const seen = prev?.wrongOptionCounts || {};
+    const samePickAgain = (picks || []).some((i) => (seen[String(i)] || 0) > 0);
+    if (samePickAgain && errorType !== 'guess' && errorType !== 'timeout') return 'misconception';
+    if ((errorType === null || errorType === 'unknown') && (prev?.wrongCount || 0) >= 1) return 'knowledge';
+    return errorType ?? prev?.errorType ?? null;
+}
+
+// Khi ôn lại mà sai: nếu chọn "Chắc chắn" thì là hiểu nhầm, "Đoán" thì là đoán, còn lại giữ kiểu sai cũ rồi để refineErrorType xem lịch sử
+const reviewErrorBase = (doc, confidence) =>
+    confidence === 'sure' ? 'misconception' : confidence === 'guess' ? 'guess' : (doc?.errorType ?? null);
+
+// ---------------------------------------------------------------------------
 // Ghi nhận một câu sai khi nộp bài. Câu sai lại (kể cả câu đã nắm) thì quay về mốc đầu: ôn lại sau 1 ngày.
 // prev: bản ghi cũ (hoặc null). incoming: ảnh chụp câu hỏi + đáp án + kiểu sai gợi ý + các đáp án sai đã chọn.
 // Không có createdAt/updatedAt: nơi gọi tự đặt bằng giờ server.
@@ -68,7 +86,7 @@ export function applyWrong(prev, incoming, nowMs) {
         correct: incoming.correct ?? null,
         alternatives: incoming.alternatives || [],
         explanation: incoming.explanation || '',
-        errorType: incoming.errorType ?? prev?.errorType ?? null,
+        errorType: refineErrorType(prev, incoming),
         confidence: incoming.confidence ?? null,
         wrongCount: (prev?.wrongCount || 0) + 1,
         reviewCount: prev?.reviewCount || 0,
@@ -107,6 +125,7 @@ export function applyReview(doc, { status, confidence = null, picks = [] }, nowM
         reviewCount: (doc?.reviewCount || 0) + 1,
         wrongCount: (doc?.wrongCount || 0) + (status === 'wrong' ? 1 : 0),
         wrongOptionCounts: status === 'wrong' ? addPicks(doc?.wrongOptionCounts, picks) : doc?.wrongOptionCounts || {},
+        ...(status === 'wrong' ? { errorType: refineErrorType(doc, { errorType: reviewErrorBase(doc, confidence), picks }) } : {}),
         lastReviewedAt: new Date(nowMs),
         lastResult: status
     };
@@ -168,3 +187,26 @@ export function summarizeMistakes(docs, limitTopics = 5) {
     const weakTopics = [...topics.values()].sort((a, b) => b.mistakes - a.mistakes || b.wrongTotal - a.wrongTotal).slice(0, limitTopics);
     return { total: docs.length, byErrorType, weakTopics };
 }
+
+// ---------------------------------------------------------------------------
+// Theo môn (bộ lọc ở màn Ôn tập). Môn lấy từ chủ đề của câu; câu không có chủ đề hoặc chủ đề không có môn đều vào "Chưa phân loại" (khớp Knowledge Map).
+// topicNames: { [topicId]: { subject, chapter, name } }
+// ---------------------------------------------------------------------------
+export const subjectOfTopic = (topicNames, topicId) => topicNames?.[topicId]?.subject || UNKNOWN_SUBJECT;
+
+// Số câu đang ôn và số câu đã đến hạn theo từng môn; môn có nhiều câu đến hạn nhất lên đầu
+export function subjectCounts(docs, topicNames, nowMs) {
+    const map = new Map();
+    for (const d of docs || []) {
+        const subject = subjectOfTopic(topicNames, d.topicId);
+        const e = map.get(subject) || { subject, open: 0, due: 0 };
+        e.open++;
+        const at = msOf(d.nextReviewAt);
+        if (at != null && at <= nowMs) e.due++;
+        map.set(subject, e);
+    }
+    return [...map.values()].sort((a, b) => b.due - a.due || b.open - a.open || a.subject.localeCompare(b.subject, 'vi'));
+}
+
+// Giữ các câu thuộc môn đã chọn
+export const filterBySubject = (docs, topicNames, subject) => (docs || []).filter((d) => subjectOfTopic(topicNames, d.topicId) === subject);

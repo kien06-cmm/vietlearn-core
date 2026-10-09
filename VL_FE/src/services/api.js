@@ -359,8 +359,14 @@ export function listMistakes(token, status = 'open') {
 }
 
 // Lấy câu để ôn (không có đáp án). scope: 'due' (mặc định, chỉ câu đến hạn) | 'open' (cả câu chưa đến hạn) -> { questions }
-export function getReviewQuestions(token, { scope = 'due', limit = 10 } = {}) {
-  return request(`/review/due?scope=${scope}&limit=${limit}`, { token })
+export function getReviewQuestions(token, { scope = 'due', limit = 10, subject = '' } = {}) {
+  const subjectQuery = subject ? `&subject=${encodeURIComponent(subject)}` : ''
+  return request(`/review/due?scope=${scope}&limit=${limit}${subjectQuery}`, { token })
+}
+
+// Các môn có câu đang ôn: { subjects: [{ subject, open, due }] }, môn nhiều câu đến hạn nhất lên đầu. Dùng cho bộ lọc theo môn ở màn Ôn tập.
+export function getReviewSubjects(token) {
+  return request('/review/subjects', { token })
 }
 
 // Chấm câu vừa ôn và cập nhật lịch: answers { [id]: giá trị }, confidence { [id]: 'sure' | 'unsure' | 'guess' } (tuỳ chọn)

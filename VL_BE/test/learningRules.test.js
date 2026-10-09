@@ -6,7 +6,11 @@ import {
     REVIEW_INTERVALS_DAYS,
     applyReview,
     applyWrong,
+    filterBySubject,
     nextStage,
+    refineErrorType,
+    subjectCounts,
+    subjectOfTopic,
     summarizeMistakes,
     toListItem,
     toReviewQuestion,
@@ -65,8 +69,36 @@ test('applyWrong: sai lại thì cộng dồn, về mốc đầu, mở lại câ
     assert.equal(d.stage, 0);
     assert.equal(d.status, 'open');
     assert.deepEqual(d.wrongOptionCounts, { 1: 2, 3: 1 });
-    assert.equal(d.errorType, 'knowledge');
+    assert.equal(d.errorType, 'misconception'); // chọn lại đúng đáp án sai đã từng chọn
     assert.equal(applyWrong(null, { ...incoming, type: 'truefalse', correct: false, picks: [] }, NOW).correct, false);
+});
+
+test('refineErrorType: chọn lại đáp án sai cũ là hiểu nhầm, trừ khi đã đánh dấu Đoán hoặc hết giờ', () => {
+    const prev = { wrongCount: 1, wrongOptionCounts: { 1: 1 }, errorType: 'knowledge' };
+    assert.equal(refineErrorType(prev, { errorType: null, picks: [1] }), 'misconception');
+    assert.equal(refineErrorType(prev, { errorType: 'careless', picks: [1] }), 'misconception');
+    assert.equal(refineErrorType(prev, { errorType: 'unknown', picks: [1] }), 'misconception');
+    assert.equal(refineErrorType(prev, { errorType: 'guess', picks: [1] }), 'guess');
+    assert.equal(refineErrorType(prev, { errorType: 'timeout', picks: [1] }), 'timeout');
+});
+
+test('refineErrorType: sai lại mà không có tín hiệu nào khác là dấu hiệu thiếu kiến thức; lần đầu thì giữ nguyên', () => {
+    const prev = { wrongCount: 1, wrongOptionCounts: { 1: 1 } };
+    assert.equal(refineErrorType(prev, { errorType: null, picks: [2] }), 'knowledge');
+    assert.equal(refineErrorType(prev, { errorType: 'unknown', picks: [2] }), 'knowledge');
+    assert.equal(refineErrorType(prev, { errorType: 'careless', picks: [2] }), 'careless');
+    assert.equal(refineErrorType(null, { errorType: 'unknown', picks: [2] }), 'unknown');
+    assert.equal(refineErrorType(null, { errorType: null, picks: [] }), null);
+    assert.equal(refineErrorType(null, { picks: [1] }), null); // câu chọn nhiều/điền không có picks thì không có gì để so
+});
+
+test('applyReview: sai khi ôn với "Chắc chắn" là hiểu nhầm, "Đoán" là đoán, chọn lại đáp án sai cũ cũng là hiểu nhầm', () => {
+    const doc = { ...applyWrong(null, { ...incoming, errorType: 'knowledge', picks: [1] }, NOW), stage: 1 };
+    assert.equal(applyReview(doc, { status: 'wrong', confidence: 'sure', picks: [3] }, NOW).errorType, 'misconception');
+    assert.equal(applyReview(doc, { status: 'wrong', confidence: 'guess', picks: [3] }, NOW).errorType, 'guess');
+    assert.equal(applyReview(doc, { status: 'wrong', picks: [1] }, NOW).errorType, 'misconception');
+    assert.equal(applyReview(doc, { status: 'wrong', picks: [3] }, NOW).errorType, 'knowledge'); // giữ kiểu sai cũ
+    assert.equal('errorType' in applyReview(doc, { status: 'correct' }, NOW), false); // đúng thì không đổi kiểu sai
 });
 
 test('nextStage: sai về 0, đoán trúng giữ nguyên, phân vân không được nắm ngay, chắc chắn thì lên mốc', () => {
@@ -153,4 +185,59 @@ test('summarizeMistakes: đếm theo kiểu sai và chủ đề nhiều câu sai
     assert.equal(out.weakTopics[0].topicId, 't2');
     assert.equal(out.weakTopics[0].mistakes, 2);
     assert.equal(out.weakTopics.at(-1).topicId, null);
+});
+
+// ---------- Theo môn ----------
+const TOPICS = {
+    t1: { subject: 'Cơ sở dữ liệu', chapter: 'Chương 1', name: 'SQL' },
+    t2: { subject: 'Lập trình Windows', chapter: 'Chương 2', name: 'WinForms' },
+    t3: { chapter: 'Chương 3', name: 'Không có môn' }
+};
+
+test('subjectOfTopic: lấy môn của chủ đề, thiếu thì vào "Chưa phân loại"', () => {
+    assert.equal(subjectOfTopic(TOPICS, 't1'), 'Cơ sở dữ liệu');
+    assert.equal(subjectOfTopic(TOPICS, 't3'), 'Chưa phân loại');
+    assert.equal(subjectOfTopic(TOPICS, 'zzz'), 'Chưa phân loại');
+    assert.equal(subjectOfTopic(TOPICS, null), 'Chưa phân loại');
+    assert.equal(subjectOfTopic(undefined, 't1'), 'Chưa phân loại');
+});
+
+test('subjectCounts: đếm câu đang ôn và câu đã đến hạn theo môn, môn nhiều câu đến hạn lên đầu', () => {
+    const docs = [
+        { topicId: 't1', nextReviewAt: new Date(NOW - DAY) },
+        { topicId: 't1', nextReviewAt: new Date(NOW + DAY) },
+        { topicId: 't2', nextReviewAt: { toMillis: () => NOW - 1 } },
+        { topicId: 't2', nextReviewAt: new Date(NOW - DAY) },
+        { topicId: 't2', nextReviewAt: new Date(NOW) },
+        { topicId: null, nextReviewAt: null }
+    ];
+    assert.deepEqual(subjectCounts(docs, TOPICS, NOW), [
+        { subject: 'Lập trình Windows', open: 3, due: 3 },
+        { subject: 'Cơ sở dữ liệu', open: 2, due: 1 },
+        { subject: 'Chưa phân loại', open: 1, due: 0 }
+    ]);
+    assert.deepEqual(subjectCounts([], TOPICS, NOW), []);
+    assert.deepEqual(subjectCounts(undefined, TOPICS, NOW), []);
+});
+
+test('subjectCounts: bằng số câu đến hạn thì môn có nhiều câu hơn đứng trước, rồi xếp theo tên', () => {
+    const later = new Date(NOW + DAY);
+    const docs = [
+        { topicId: 't2', nextReviewAt: later },
+        { topicId: 't1', nextReviewAt: later },
+        { topicId: 't1', nextReviewAt: later }
+    ];
+    assert.deepEqual(
+        subjectCounts(docs, TOPICS, NOW).map((s) => s.subject),
+        ['Cơ sở dữ liệu', 'Lập trình Windows']
+    );
+});
+
+test('filterBySubject: chỉ giữ câu của môn đã chọn, kể cả "Chưa phân loại"', () => {
+    const docs = [{ questionId: 'a', topicId: 't1' }, { questionId: 'b', topicId: 't2' }, { questionId: 'c', topicId: 't3' }, { questionId: 'd' }];
+    const ids = (list) => list.map((d) => d.questionId);
+    assert.deepEqual(ids(filterBySubject(docs, TOPICS, 'Lập trình Windows')), ['b']);
+    assert.deepEqual(ids(filterBySubject(docs, TOPICS, 'Chưa phân loại')), ['c', 'd']);
+    assert.deepEqual(ids(filterBySubject(docs, TOPICS, 'Môn không tồn tại')), []);
+    assert.deepEqual(filterBySubject(undefined, TOPICS, 'x'), []);
 });
