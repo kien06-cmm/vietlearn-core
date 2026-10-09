@@ -1,0 +1,132 @@
+/* Giao diện trang Ôn tập (Phase 5): số câu cần ôn hôm nay, làm bài ôn, sổ lỗi sai. Mobile-first, dùng token trong index.css nên tự đổi theo chế độ tối. */
+
+.review-today {
+  gap: 0.625rem;
+}
+
+.review-count {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  color: var(--muted);
+}
+
+.review-count span {
+  padding: 0 0.15em;
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+  background: linear-gradient(transparent 60%, var(--hl) 60%, var(--hl) 92%, transparent 92%);
+}
+
+.review-progress {
+  margin-top: 0.5rem;
+}
+
+/* Phản hồi sau khi chấm một câu ôn */
+.review-verdict {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.review-verdict-correct {
+  color: var(--ok);
+}
+
+.review-verdict-wrong {
+  color: var(--danger);
+}
+
+/* Hai tab của sổ lỗi sai */
+.review-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.review-tab {
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  min-height: 2.75rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.review-tab-on {
+  color: var(--accent);
+  background: var(--tint);
+  border: 2px solid var(--accent);
+}
+
+.review-tab:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+/* Đáp án trong sổ: gập lại để người học tự nhớ trước khi xem */
+.review-answer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.review-answer summary {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.review-answer[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+/* Bản đồ kiến thức: mức thành thạo từng chủ đề. Mức luôn có chữ kèm theo, màu chỉ là phụ. */
+.mastery-chapter {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.mastery-chapter h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+.mastery-level {
+  justify-self: start;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mastery-level-weak {
+  color: var(--danger);
+}
+
+.mastery-level-learning {
+  color: var(--accent);
+}
+
+.mastery-level-strong {
+  color: var(--ok);
+}
+
+.topic-bar-fill.mastery-fill-weak {
+  background: var(--danger);
+}
+
+.topic-bar-fill.mastery-fill-learning {
+  background: var(--accent);
+}
+
+.topic-bar-fill.mastery-fill-strong {
+  background: var(--ok);
+}

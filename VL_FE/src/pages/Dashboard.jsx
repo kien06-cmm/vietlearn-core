@@ -9,6 +9,7 @@ const LINKS = [
   { href: '#/documents', title: 'Tài liệu', text: 'Tải tài liệu lên để tạo câu hỏi.' },
   { href: '#/questions', title: 'Câu hỏi', text: 'Tạo và duyệt câu hỏi từ tài liệu.' },
   { href: '#/quiz', title: 'Quiz & phòng', text: 'Tạo bài, mở phòng cho cả lớp.' },
+  { href: '#/review', title: 'Ôn tập', text: 'Ôn lại câu từng sai theo lịch 1, 3, 7 ngày.' },
   { href: '#/settings', title: 'Cài đặt', text: 'Giao diện, hồ sơ, tài khoản.' },
 ]
 

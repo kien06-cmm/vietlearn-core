@@ -22,9 +22,10 @@ import '../pages/Attempt.css'
 
 const SAVE_DEBOUNCE_MS = 1200
 const SAVE_RETRY_MS = 5000
+const MAX_SPENT_MS = 3_600_000
 
 // Ô nhập câu trả lời theo từng dạng câu hỏi
-function QuestionInput({ q, value, onChange }) {
+export function QuestionInput({ q, value, onChange }) {
   if (q.type === 'single') {
     return (
       <div className="choice-list" role="radiogroup">
@@ -113,6 +114,10 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
   const confidenceRef = useRef({})
   const dirtyRef = useRef(new Set())
   const dirtyConfRef = useRef(new Set())
+  const spentRef = useRef({})
+  const spentSentRef = useRef({})
+  const curQRef = useRef(null)
+  const tickRef = useRef(null)
   const savingRef = useRef(false)
   const finishingRef = useRef(false)
   const autoFailedRef = useRef(false)
@@ -138,6 +143,8 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
       const savedConf = res.attempt.confidence || {}
       confidenceRef.current = { ...savedConf }
       setConfidence({ ...savedConf })
+      spentRef.current = { ...(res.attempt.spent || {}) }
+      spentSentRef.current = { ...spentRef.current }
       setNow(Date.now() + offsetRef.current)
       setSession({ attempt: res.attempt, questions: res.questions || [], resumed: Boolean(res.resumed) })
       setPhase('running')
@@ -152,6 +159,17 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
     if (roomCode) handleStart()
   }, [])
 
+  // ---------- Thời gian từng câu (chỉ tính khi tab đang hiện) ----------
+  const tick = useCallback(() => {
+    const now = Date.now()
+    const id = curQRef.current
+    const last = tickRef.current
+    tickRef.current = now
+    if (!id || last == null || document.hidden) return
+    const next = (spentRef.current[id] || 0) + Math.min(now - last, 5000)
+    spentRef.current[id] = Math.min(next, MAX_SPENT_MS)
+  }, [])
+
   // ---------- Lưu nháp ----------
   const flush = useCallback(async () => {
     if (savingRef.current || !attemptId || (dirtyRef.current.size === 0 && dirtyConfRef.current.size === 0)) return
@@ -162,11 +180,15 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
     for (const id of ids) patch[id] = answersRef.current[id] ?? null
     const confPatch = {}
     for (const id of confIds) confPatch[id] = confidenceRef.current[id] ?? null
+    tick()
+    const spentPatch = {}
+    for (const [id, ms] of Object.entries(spentRef.current)) if (spentSentRef.current[id] !== ms) spentPatch[id] = ms
     dirtyRef.current.clear()
     dirtyConfRef.current.clear()
     setSaveState('saving')
     try {
-      await saveAttemptAnswers(await getToken(), attemptId, patch, confPatch)
+      await saveAttemptAnswers(await getToken(), attemptId, patch, confPatch, spentPatch)
+      Object.assign(spentSentRef.current, spentPatch)
       setSaveState(dirtyRef.current.size || dirtyConfRef.current.size ? 'dirty' : 'saved')
       setSavedAt(new Date())
     } catch (err) {
@@ -180,7 +202,7 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
     } finally {
       savingRef.current = false
     }
-  }, [attemptId, getToken])
+  }, [attemptId, getToken, tick])
 
   function setAnswer(id, value) {
     answersRef.current = { ...answersRef.current, [id]: value }
@@ -237,8 +259,9 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
         for (const [id, v] of Object.entries(answersRef.current)) if (isAnswered(v)) final[id] = v
         const finalConf = {}
         for (const id of Object.keys(final)) finalConf[id] = confidenceRef.current[id] ?? null
+        tick()
         try {
-          await submitAttempt(token, attemptId, final, finalConf)
+          await submitAttempt(token, attemptId, final, finalConf, { ...spentRef.current })
         } catch (err) {
           // Hết giờ hoặc đã nộp: bài đã được chốt ở server, cứ lấy kết quả
           if (err.code !== 'time-up' && err.code !== 'already-submitted') throw err
@@ -253,12 +276,24 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
         setPhase('running')
       }
     },
-    [attemptId, getToken]
+    [attemptId, getToken, tick]
   )
 
   useEffect(() => {
     finishRef.current = () => finish(true)
   }, [finish])
+
+  const currentId = questions.length ? questions[Math.min(index, questions.length - 1)].id : null
+  useEffect(() => {
+    if (phase !== 'running') return
+    curQRef.current = currentId
+    tickRef.current = Date.now()
+    const t = setInterval(tick, 1000)
+    return () => {
+      clearInterval(t)
+      tick()
+    }
+  }, [phase, currentId, tick])
 
   // ---------- Đồng hồ ----------
   useEffect(() => {

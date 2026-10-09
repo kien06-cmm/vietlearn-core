@@ -7,6 +7,9 @@ export const MAX_EVENTS = 200; // mỗi lượt làm ghi tối đa 200 sự ki�
 export const EVENT_TYPES = ['tab_hidden', 'tab_visible', 'window_blur', 'window_focus', 'copy', 'paste'];
 export const CONFIDENCE_LEVELS = ['sure', 'unsure', 'guess'];
 export const MAX_CHANGES = 50;
+export const MAX_SPENT_MS = 3_600_000; // thời gian tối đa ghi cho một câu: 1 giờ
+export const CARELESS_MS = 3000; // sai mà trả lời dưới 3 giây thì gợi ý là ẩu
+export const ERROR_TYPES = ['timeout', 'guess', 'careless', 'changed', 'misconception', 'knowledge'];
 export const MAX_FILL_CHARS = 200;
 export const MAX_SHORT_CHARS = 300;
 
@@ -225,7 +228,7 @@ export function gradeAttempt(questions, keys, answers) {
 }
 
 // Bản xem lại sau khi nộp: đúng thứ tự và thứ tự đáp án người làm đã thấy, kèm đáp án đúng và giải thích
-export function buildReview({ questions, settings, seed, keys, answers, statuses, confidence, changes }) {
+export function buildReview({ questions, settings, seed, keys, answers, statuses, confidence, changes, spent, errorTypes }) {
     return arrange(questions, settings, seed).map(({ q, options }) => {
         const key = keys?.[q.id] || {};
         return {
@@ -240,6 +243,8 @@ export function buildReview({ questions, settings, seed, keys, answers, statuses
             topicId: q.topicId ?? null,
             confidence: confidence?.[q.id] ?? null,
             changes: changes?.[q.id] ?? 0,
+            spentMs: spent?.[q.id] ?? null,
+            errorType: errorTypes?.[q.id] ?? null,
             explanation: q.explanation || ''
         };
     });
@@ -332,4 +337,59 @@ export function summarizeTopics(questions, statuses, topicInfo) {
             return { ...t, name: info.name ?? null, chapter: info.chapter ?? null, subject: info.subject ?? null };
         })
         .sort((a, b) => a.correct / a.total - b.correct / b.total || b.total - a.total);
+}
+
+// ---------------------------------------------------------------------------
+// Thời gian từng câu + gợi ý kiểu sai (Phase 5)
+// ---------------------------------------------------------------------------
+
+// Làm sạch { [questionId]: ms } do client báo (cộng dồn)
+export function cleanSpent(questions, input) {
+    const ids = new Set(questions.map((q) => q.id));
+    const spent = {};
+    for (const [id, ms] of Object.entries(input || {})) {
+        if (!ids.has(id) || !Number.isFinite(ms) || ms < 0) continue;
+        spent[id] = Math.min(Math.round(ms), MAX_SPENT_MS);
+    }
+    return spent;
+}
+
+// Thời gian cộng dồn chỉ tăng, lấy giá trị lớn hơn (gửi trùng hay sai thứ tự vẫn đúng)
+export function mergeSpent(saved, patch) {
+    const out = { ...(saved || {}) };
+    for (const [id, ms] of Object.entries(patch || {})) out[id] = Math.max(out[id] || 0, ms);
+    return out;
+}
+
+// Gợi ý kiểu sai cho MỘT câu theo luật cố định. Thứ tự ưu tiên: hết giờ, đoán, ẩu, đổi đáp án, hiểu nhầm, thiếu kiến thức.
+// Trả null nếu không phải lỗi (đúng, tự đối chiếu) hoặc bỏ trống mà không phải do hết giờ.
+export function classifyError({ status, type, confidence, changes = 0, spentMs = null, submitReason = null }) {
+    if (type === 'short' || status === 'correct' || status === 'pending') return null;
+    if (status === 'unanswered') return submitReason === 'timeout' || submitReason === 'room-ended' ? 'timeout' : null;
+    if (status !== 'wrong') return null;
+    if (confidence === 'guess') return 'guess';
+    if (spentMs != null && spentMs < CARELESS_MS) return 'careless';
+    if (changes > 0) return 'changed';
+    if (confidence === 'sure') return 'misconception';
+    return 'knowledge';
+}
+
+// Phân loại cả lượt làm: { byQuestion: { [id]: loại }, summary: { [loại]: số câu } }
+export function classifyErrors({ questions, statuses, confidence, changes, spent, submitReason }) {
+    const byQuestion = {};
+    const summary = Object.fromEntries(ERROR_TYPES.map((t) => [t, 0]));
+    for (const q of questions) {
+        const t = classifyError({
+            status: statuses?.[q.id],
+            type: q.type,
+            confidence: confidence?.[q.id],
+            changes: changes?.[q.id] || 0,
+            spentMs: spent?.[q.id] ?? null,
+            submitReason
+        });
+        if (!t) continue;
+        byQuestion[q.id] = t;
+        summary[t]++;
+    }
+    return { byQuestion, summary };
 }

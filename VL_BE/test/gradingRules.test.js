@@ -6,14 +6,18 @@ import {
     arrange,
     buildAttemptView,
     buildReview,
+    classifyError,
+    classifyErrors,
     cleanAnswer,
     cleanAnswers,
     cleanConfidence,
+    cleanSpent,
     computeDeadline,
     countChanges,
     gradeAttempt,
     isPastDeadline,
     mergeAnswers,
+    mergeSpent,
     normalizeFill,
     pruneConfidence,
     seededShuffle,
@@ -295,4 +299,66 @@ test('bản xem lại có mức tự tin, số lần đổi và chủ đề', ()
     const bare = buildReview({ questions: qs, settings: SHUFFLE_NONE, seed: 1, keys, answers: {}, statuses: {} });
     assert.equal(bare[0].confidence, null);
     assert.equal(bare[0].changes, 0);
+});
+
+// ---------- Thời gian + gợi ý kiểu sai (Phase 5) ----------
+test('cleanSpent: chỉ nhận số không âm của câu thuộc đề, cắt trần 1 giờ', () => {
+    const out = cleanSpent(questions, { q1: 1234.6, q2: -5, q3: 'x', zzz: 10, q4: 99_999_999 });
+    assert.deepEqual(out, { q1: 1235, q4: 3_600_000 });
+});
+
+test('mergeSpent: giữ giá trị lớn hơn', () => {
+    assert.deepEqual(mergeSpent({ q1: 5000, q2: 100 }, { q1: 3000, q2: 900, q3: 50 }), { q1: 5000, q2: 900, q3: 50 });
+});
+
+test('classifyError: thứ tự ưu tiên hết giờ, đoán, ẩu, đổi đáp án, hiểu nhầm, thiếu kiến thức', () => {
+    const base = { status: 'wrong', type: 'single', confidence: null, changes: 0, spentMs: 20_000, submitReason: 'submitted' };
+    assert.equal(classifyError({ ...base, status: 'unanswered', submitReason: 'timeout' }), 'timeout');
+    assert.equal(classifyError({ ...base, status: 'unanswered', submitReason: 'room-ended' }), 'timeout');
+    assert.equal(classifyError({ ...base, status: 'unanswered' }), null);
+    assert.equal(classifyError({ ...base, confidence: 'guess', spentMs: 1000, changes: 2 }), 'guess');
+    assert.equal(classifyError({ ...base, spentMs: 2999, changes: 2, confidence: 'sure' }), 'careless');
+    assert.equal(classifyError({ ...base, spentMs: 3000 }), 'knowledge');
+    assert.equal(classifyError({ ...base, changes: 1, confidence: 'sure' }), 'changed');
+    assert.equal(classifyError({ ...base, confidence: 'sure' }), 'misconception');
+    assert.equal(classifyError({ ...base, confidence: 'unsure' }), 'knowledge');
+    assert.equal(classifyError({ ...base, spentMs: null }), 'knowledge');
+});
+
+test('classifyError: câu đúng, tự đối chiếu, trả lời ngắn không bị phân loại', () => {
+    assert.equal(classifyError({ status: 'correct', type: 'single' }), null);
+    assert.equal(classifyError({ status: 'pending', type: 'short' }), null);
+    assert.equal(classifyError({ status: 'unanswered', type: 'short', submitReason: 'timeout' }), null);
+});
+
+test('classifyErrors: phân loại cả lượt và đếm theo loại', () => {
+    const statuses = { q1: 'wrong', q2: 'wrong', q3: 'correct', q4: 'unanswered', q5: 'pending' };
+    const out = classifyErrors({
+        questions,
+        statuses,
+        confidence: { q1: 'sure', q2: 'guess' },
+        changes: {},
+        spent: { q1: 15_000, q2: 8000 },
+        submitReason: 'timeout'
+    });
+    assert.deepEqual(out.byQuestion, { q1: 'misconception', q2: 'guess', q4: 'timeout' });
+    assert.equal(out.summary.misconception, 1);
+    assert.equal(out.summary.guess, 1);
+    assert.equal(out.summary.timeout, 1);
+    assert.equal(out.summary.knowledge, 0);
+});
+
+test('bản xem lại có thời gian và gợi ý kiểu sai', () => {
+    const review = buildReview({
+        questions: [byId('q1')],
+        settings: SHUFFLE_NONE,
+        seed: 1,
+        keys,
+        answers: { q1: 1 },
+        statuses: { q1: 'wrong' },
+        spent: { q1: 7000 },
+        errorTypes: { q1: 'knowledge' }
+    });
+    assert.equal(review[0].spentMs, 7000);
+    assert.equal(review[0].errorType, 'knowledge');
 });

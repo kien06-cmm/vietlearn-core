@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { id: 'documents', label: 'Tài liệu', icon: 'file' },
   { id: 'questions', label: 'Câu hỏi', icon: 'list' },
   { id: 'quiz', label: 'Quiz', icon: 'target' },
+  { id: 'review', label: 'Ôn tập', icon: 'refresh' },
   { id: 'settings', label: 'Cài đặt', icon: 'settings' },
 ]
 

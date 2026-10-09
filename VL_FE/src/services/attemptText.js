@@ -32,3 +32,16 @@ export const CONFIDENCE_LEVELS = [
 export const CONFIDENCE_LABELS = Object.fromEntries(CONFIDENCE_LEVELS.map((c) => [c.value, c.label]))
 
 export const timeText = (d) => d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+
+// Gợi ý kiểu sai (Phase 5). Backend phân loại theo luật cố định nên chỉ là gợi ý, không phải kết luận.
+// label: nhãn ngắn trên huy hiệu; hint: lý do gợi ý + việc nên làm
+export const ERROR_TYPES = [
+  { value: 'misconception', label: 'Có thể hiểu nhầm', hint: 'Bạn chọn “Chắc chắn” nhưng sai. Nên xem lại cách hiểu khái niệm này.' },
+  { value: 'knowledge', label: 'Có thể thiếu kiến thức', hint: 'Sai và không có dấu hiệu đoán hay làm vội. Nên ôn lại phần lý thuyết liên quan.' },
+  { value: 'guess', label: 'Có thể do đoán', hint: 'Bạn đánh dấu “Đoán”. Câu này chưa nắm, nên học lại trước khi làm tiếp.' },
+  { value: 'careless', label: 'Có thể do ẩu', hint: 'Bạn trả lời rất nhanh (dưới 3 giây). Thử đọc kỹ đề và các lựa chọn hơn.' },
+  { value: 'changed', label: 'Có thể do đổi đáp án', hint: 'Bạn đã đổi đáp án rồi sai. Lần sau hãy tin vào cách làm đã cân nhắc kỹ.' },
+  { value: 'timeout', label: 'Hết giờ', hint: 'Câu này còn bỏ trống khi hết giờ. Thử chia thời gian đều hơn giữa các câu.' },
+]
+
+export const ERROR_LABELS = Object.fromEntries(ERROR_TYPES.map((e) => [e.value, e.label]))

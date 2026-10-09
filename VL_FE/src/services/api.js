@@ -1,4 +1,4 @@
-// Chức năng: các hàm gọi API backend trên Render (health, hồ sơ /me, tài liệu /documents, câu hỏi + AI /questions /topics, ghi sự kiện analytics).
+// Chức năng: các hàm gọi API backend trên Render (health, hồ sơ /me, tài liệu /documents, câu hỏi + AI /questions /topics, quiz, làm bài, phòng, ôn tập /review, ghi sự kiện analytics).
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://vietlearn-core.onrender.com'
 
 // Gửi request tới backend. body (nếu có) được gửi dạng JSON.
@@ -258,24 +258,27 @@ export function getAttempt(token, id) {
 }
 
 // Lưu nháp: chỉ gửi các câu vừa đổi -> { savedAt, rejected }. Quá giờ thì backend trả 409 code 'time-up'.
-// confidence (tuỳ chọn): { [questionId]: 'sure' | 'unsure' | 'guess' | null }
-export function saveAttemptAnswers(token, id, answers, confidence) {
+// confidence (tuỳ chọn): { [questionId]: 'sure' | 'unsure' | 'guess' | null }; spent (tuỳ chọn): { [questionId]: ms cộng dồn }
+export function saveAttemptAnswers(token, id, answers, confidence, spent) {
   const body = {}
   if (answers && Object.keys(answers).length) body.answers = answers
   if (confidence && Object.keys(confidence).length) body.confidence = confidence
+  if (spent && Object.keys(spent).length) body.spent = spent
   return request(`/attempts/${id}/answers`, { token, method: 'PUT', body })
 }
 
-// Nộp bài (có thể kèm câu trả lời và mức tự tin cuối). Nộp lại bài đã nộp trả lại kết quả cũ -> { already, submitReason, result }
-export function submitAttempt(token, id, answers, confidence) {
+// Nộp bài (có thể kèm câu trả lời, mức tự tin và thời gian cuối). Nộp lại bài đã nộp trả lại kết quả cũ -> { already, submitReason, result }
+export function submitAttempt(token, id, answers, confidence, spent) {
   const body = {}
   if (answers) body.answers = answers
   if (confidence) body.confidence = confidence
+  if (spent) body.spent = spent
   return request(`/attempts/${id}/submit`, { token, method: 'POST', body })
 }
 
-// Xem lại sau khi nộp: { attempt, review: [{ id, type, stem, options, given, correct, status, explanation, topicId, confidence, changes }],
+// Xem lại sau khi nộp: { attempt, review: [{ id, type, stem, options, given, correct, status, explanation, topicId, confidence, changes, spentMs, errorType }],
 //   confidenceSummary: { rated, levels: { sure|unsure|guess: { correct, wrong } }, sureWrong, guessCorrect },
+//   errorSummary: { timeout, guess, careless, changed, misconception, knowledge: số câu } (gợi ý theo luật, không phải kết luận),
 //   topics: [{ topicId, name, chapter, subject, correct, wrong, unanswered, total }] }
 export function getAttemptResult(token, id) {
   return request(`/attempts/${id}/result`, { token })
@@ -338,6 +341,41 @@ export function endRoom(token, code) {
 // Bắt đầu (hoặc tiếp tục) làm bài trong phòng đang chạy: { attempt, questions, serverNow, resumed }
 export function startRoomAttempt(token, code) {
   return request('/attempts/room', { token, method: 'POST', body: { code } })
+}
+
+// ---------- Ôn tập (Phase 5) ----------
+// Sổ lỗi sai + lịch ôn 1 -> 3 -> 7 ngày. Chỉ dùng được với tài khoản (khách chưa có sổ).
+
+// Tóm tắt nhẹ cho Trang chủ: { open, due, mastered, nextDueAt, serverNow }
+export function getReviewSummary(token) {
+  return request('/review/summary', { token })
+}
+
+// Sổ lỗi sai: status = 'open' (mặc định) | 'mastered'
+// -> { mistakes: [{ id, type, stem, options, topicName, errorType, wrongCount, stage, nextReviewAt, topWrong: { index, count, text } | null, correct, alternatives, explanation }],
+//      summary: { total, byErrorType, weakTopics: [{ topicId, name, mistakes }] } | null }
+export function listMistakes(token, status = 'open') {
+  return request(`/review/mistakes?status=${status}`, { token })
+}
+
+// Lấy câu để ôn (không có đáp án). scope: 'due' (mặc định, chỉ câu đến hạn) | 'open' (cả câu chưa đến hạn) -> { questions }
+export function getReviewQuestions(token, { scope = 'due', limit = 10 } = {}) {
+  return request(`/review/due?scope=${scope}&limit=${limit}`, { token })
+}
+
+// Chấm câu vừa ôn và cập nhật lịch: answers { [id]: giá trị }, confidence { [id]: 'sure' | 'unsure' | 'guess' } (tuỳ chọn)
+// -> { items: [{ id, status: 'correct' | 'wrong', given, correct, alternatives, explanation, stage, mastered, nextReviewAt }], summary }
+export function gradeReview(token, answers, confidence) {
+  const body = { answers }
+  if (confidence && Object.keys(confidence).length) body.confidence = confidence
+  return request('/review/grade', { token, method: 'POST', body })
+}
+
+// Bản đồ kiến thức: mức thành thạo từng chủ đề, tính trên 30 câu gần nhất (cần ≥ 5 câu mới xếp loại)
+// -> { map: [{ subject, percent, level, sample, chapters: [{ chapter, percent, level, sample, topics: [{ topicId, name, percent, level: 'new' | 'weak' | 'learning' | 'strong', sample, answered, lastAt }] }] }],
+//      weakest: [topic yếu nhất], counts: { new, weak, learning, strong } }
+export function getMastery(token) {
+  return request('/review/mastery', { token })
 }
 
 // Ghi sự kiện analytics ('visit' | 'register'). Lỗi được bỏ qua để không ảnh hưởng người dùng.

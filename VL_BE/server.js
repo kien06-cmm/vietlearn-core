@@ -1,4 +1,4 @@
-// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), phiên khách /guest-sessions, ghi sự kiện analytics /events, và gắn các router: tài liệu, câu hỏi + AI, quiz, làm bài, phòng làm bài (kèm WebSocket realtime tại /ws).
+// Chức năng: server API chính (Express) - health check, hồ sơ người dùng /me (xem, sửa, xóa mềm), phiên khách /guest-sessions, ghi sự kiện analytics /events, và gắn các router: tài liệu, câu hỏi + AI, quiz, làm bài, phòng làm bài (kèm WebSocket realtime tại /ws), ôn tập (sổ lỗi sai, lịch ôn).
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ import questionsRouter from './routes/questions.js';
 import quizzesRouter from './routes/quizzes.js';
 import attemptsRouter from './routes/attempts.js';
 import roomsRouter from './routes/rooms.js';
+import reviewRouter from './routes/review.js';
 import { startWorker } from './worker/index.js';
 import { attachRealtime } from './realtime/wsServer.js';
 
@@ -291,6 +292,8 @@ app.use('/quizzes', quizzesRouter);
 app.use('/attempts', attemptsRouter);
 // Phòng làm bài: tạo phòng, vào bằng mã, bắt đầu/kết thúc (Phase 4)
 app.use('/rooms', roomsRouter);
+// Ôn tập: sổ lỗi sai + lịch ôn 1-3-7 ngày (Phase 5)
+app.use('/review', reviewRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi

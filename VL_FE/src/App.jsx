@@ -14,6 +14,7 @@ import Settings from './pages/Settings.jsx'
 import Documents from './pages/Documents.jsx'
 import Questions from './pages/Questions.jsx'
 import Quizzes from './pages/Quizzes.jsx'
+import Review from './pages/Review.jsx'
 import RoomJoin from './components/RoomJoin.jsx'
 import './App.css'
 
@@ -166,6 +167,7 @@ function App() {
       {route === 'quiz' && (
         <Quizzes getToken={getToken} />
       )}
+      {route === 'review' && <Review getToken={getToken} />}
       {route === 'join' && (
         <RoomJoin
           getToken={getToken}

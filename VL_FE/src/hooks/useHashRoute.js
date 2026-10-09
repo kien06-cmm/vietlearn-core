@@ -1,7 +1,7 @@
 // Chức năng: điều hướng đơn giản bằng phần # của địa chỉ (vd: #/settings), không cần thư viện router.
 import { useEffect, useState } from 'react'
 
-export const ROUTES = ['home', 'documents', 'questions', 'quiz', 'settings', 'join']
+export const ROUTES = ['home', 'documents', 'questions', 'quiz', 'review', 'settings', 'join']
 
 // '#/join/ABC234' -> route 'join', phần sau là tham số (mã phòng)
 function readRoute() {

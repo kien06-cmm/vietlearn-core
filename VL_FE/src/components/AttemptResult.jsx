@@ -1,6 +1,6 @@
 // Chức năng: kết quả sau khi nộp bài (Phase 4) - điểm, số câu đúng/sai/bỏ qua, và xem lại từng câu với đáp án đúng và giải thích.
 import { useState } from 'react'
-import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, LETTERS, STATUS_LABELS, tfText } from '../services/attemptText.js'
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, ERROR_LABELS, ERROR_TYPES, LETTERS, STATUS_LABELS, tfText } from '../services/attemptText.js'
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
 import { TYPE_LABELS } from './QuestionCard.jsx'
@@ -11,7 +11,7 @@ import '../pages/Attempt.css'
 const hasIndex = (v, idx) => (Array.isArray(v) ? v.includes(idx) : v === idx)
 
 // Hiển thị câu trả lời của người làm và đáp án đúng cho từng dạng câu
-function ReviewBody({ item }) {
+export function ReviewBody({ item }) {
   const { type, options, given, correct, alternatives } = item
 
   if (type === 'single' || type === 'multi') {
@@ -101,6 +101,30 @@ function ConfidenceSummary({ summary }) {
   )
 }
 
+const ERROR_HINT_BY = Object.fromEntries(ERROR_TYPES.map((e) => [e.value, e.hint]))
+
+// Gợi ý nguyên nhân sai: backend phân loại theo luật cố định nên chỉ là gợi ý, không khẳng định tuyệt đối
+function ErrorSummary({ summary }) {
+  const rows = ERROR_TYPES.filter((e) => summary?.[e.value] > 0)
+  if (rows.length === 0) return null
+  return (
+    <section className="card">
+      <h2>Gợi ý nguyên nhân sai</h2>
+      <ul className="conf-rows">
+        {rows.map((e) => (
+          <li key={e.value} className="conf-row">
+            <span>{e.label}</span>
+            <strong>{summary[e.value]} câu</strong>
+          </li>
+        ))}
+      </ul>
+      <p className="hint">
+        Đây chỉ là gợi ý dựa trên mức tự tin, thời gian làm và số lần đổi đáp án, không phải kết luận chắc chắn.
+      </p>
+    </section>
+  )
+}
+
 // Kết quả theo chủ đề, chủ đề yếu nhất lên đầu
 function TopicSummary({ topics }) {
   return (
@@ -131,7 +155,7 @@ function TopicSummary({ topics }) {
 
 export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về danh sách quiz' }) {
   const [onlyMissed, setOnlyMissed] = useState(false)
-  const { attempt, review, confidenceSummary, topics } = res
+  const { attempt, review, confidenceSummary, errorSummary, topics } = res
   const r = attempt.result
   const shown = onlyMissed ? review.filter((x) => x.status === 'wrong' || x.status === 'unanswered') : review
   const missed = review.filter((x) => x.status === 'wrong' || x.status === 'unanswered').length
@@ -183,6 +207,7 @@ export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về 
       </section>
 
       <ConfidenceSummary summary={confidenceSummary} />
+      <ErrorSummary summary={errorSummary} />
       {topics?.length > 0 && <TopicSummary topics={topics} />}
 
       <section>
@@ -205,11 +230,13 @@ export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về 
               <span className={`badge review-status review-status-${item.status}`}>{STATUS_LABELS[item.status]}</span>
               {item.confidence && <span className="badge">Tự tin: {CONFIDENCE_LABELS[item.confidence]}</span>}
               {item.changes > 0 && <span className="badge">Đổi đáp án {item.changes} lần</span>}
+              {item.errorType && <span className="badge">Gợi ý: {ERROR_LABELS[item.errorType]}</span>}
             </div>
             <p className="q-stem">
               <MathText text={item.stem} />
             </p>
             <ReviewBody item={item} />
+            {item.errorType && <p className="hint">{ERROR_HINT_BY[item.errorType]}</p>}
             {item.explanation && (
               <p className="q-explain">
                 <strong>Giải thích: </strong>
