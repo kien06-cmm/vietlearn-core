@@ -25,7 +25,9 @@ function Level({ level }) {
   return <span className={`mastery-level mastery-level-${level}`}>{LEVEL_TEXT[level]}</span>
 }
 
-function TopicRow({ t }) {
+function TopicRow({ t, onPractice }) {
+  // Chủ đề đã đủ dữ liệu mà chưa vững thì cho luyện ngay
+  const canPractice = onPractice && (t.level === 'weak' || t.level === 'learning')
   return (
     <li className="topic-row">
       <div className="topic-row-head">
@@ -34,11 +36,16 @@ function TopicRow({ t }) {
       </div>
       <Level level={t.level} />
       <Bar percent={t.percent} level={t.level} />
+      {canPractice && (
+        <button className="btn btn-secondary" onClick={() => onPractice({ id: t.topicId, name: t.name })}>
+          Luyện chủ đề này
+        </button>
+      )}
     </li>
   )
 }
 
-export default function KnowledgeMap({ getToken, onBack }) {
+export default function KnowledgeMap({ getToken, onBack, onPractice }) {
   const [data, setData] = useState(null) // null: đang tải
   const [error, setError] = useState('')
 
@@ -105,6 +112,11 @@ export default function KnowledgeMap({ getToken, onBack }) {
                     </li>
                   ))}
                 </ul>
+                {onPractice && (
+                  <button className="btn btn-primary" onClick={() => onPractice({ id: data.weakest[0].topicId, name: data.weakest[0].name })}>
+                    Luyện phần yếu: {data.weakest[0].name || 'chủ đề yếu nhất'}
+                  </button>
+                )}
               </>
             )}
           </section>
@@ -121,7 +133,7 @@ export default function KnowledgeMap({ getToken, onBack }) {
                   <h3>{c.chapter}</h3>
                   <ul className="topic-rows">
                     {c.topics.map((t) => (
-                      <TopicRow key={t.topicId} t={t} />
+                      <TopicRow key={t.topicId} t={t} onPractice={onPractice} />
                     ))}
                   </ul>
                 </div>

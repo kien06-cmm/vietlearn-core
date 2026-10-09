@@ -12,6 +12,7 @@ import {
     MAX_MISTAKES_LIST,
     MAX_REVIEW_BATCH,
     applyReview,
+    applyWrong,
     summarizeMistakes,
     toListItem,
     toReviewQuestion,
@@ -20,6 +21,7 @@ import {
 import { countOf, loadTopicNames, mistakesCol } from '../mistakes.js';
 import { recordTopicOutcomes, statsCol } from '../mastery.js';
 import { buildKnowledgeMap, outcomesByTopic, toMasteryItem } from '../quiz/masteryRules.js';
+import { pickPractice, toPracticeQuestion } from '../quiz/practiceRules.js';
 
 const router = Router();
 const userOnly = requireRole(['user']);
@@ -151,11 +153,19 @@ router.post(
         const snaps = await getDb().getAll(...ids.map((id) => col.doc(id)));
         const docs = new Map();
         for (const s of snaps) if (s.exists && s.data().status) docs.set(s.id, s.data());
-        if (docs.size === 0) return fail(res, 404, 'Không tìm thấy câu trong sổ lỗi sai');
+        // Câu chưa có trong sổ nhưng là câu đã duyệt trong ngân hàng của chính người dùng (luyện phần yếu): chấm từ ngân hàng
+        const bank = await loadBank(req.actor.id, ids.filter((id) => !docs.has(id)));
+        if (docs.size + bank.size === 0) return fail(res, 404, 'Không tìm thấy câu để chấm');
 
-        // Dựng lại câu + đáp án từ bản chụp trong sổ để chấm bằng đúng luật của bài thường
-        const questions = [...docs].map(([id, d]) => ({ id, type: d.type, topicId: d.topicId ?? null, options: d.options || [] }));
-        const keys = Object.fromEntries([...docs].map(([id, d]) => [id, { correct: d.correct, alternatives: d.alternatives }]));
+        // Dựng lại câu + đáp án từ bản chụp trong sổ (hoặc từ ngân hàng) để chấm bằng đúng luật của bài thường
+        const questions = [
+            ...[...docs].map(([id, d]) => ({ id, type: d.type, topicId: d.topicId ?? null, options: d.options || [] })),
+            ...[...bank].map(([id, b]) => ({ id, type: b.q.type, topicId: b.q.topicId ?? null, options: b.q.options || [] }))
+        ];
+        const keys = Object.fromEntries([
+            ...[...docs].map(([id, d]) => [id, { correct: d.correct, alternatives: d.alternatives }]),
+            ...[...bank].map(([id, b]) => [id, { correct: b.key.correct, alternatives: b.key.alternatives }])
+        ]);
         const { answers, rejected } = cleanAnswers(questions, parsed.data.answers);
         const { confidence } = cleanConfidence(questions, parsed.data.confidence);
         const result = gradeAttempt(questions, keys, answers);
@@ -167,6 +177,46 @@ router.post(
             const status = result.statuses[q.id];
             if (status !== 'correct' && status !== 'wrong') continue; // bỏ trống hoặc tự đối chiếu: không đổi lịch
             const doc = docs.get(q.id);
+            if (!doc) {
+                // Câu từ ngân hàng: đúng thì không cần ghi sổ; sai thì vào sổ lỗi sai để ôn theo lịch 1 -> 3 -> 7 ngày
+                const { q: bq, key } = bank.get(q.id);
+                let nextReviewAt = null;
+                if (status === 'wrong') {
+                    const data = applyWrong(
+                        null,
+                        {
+                            questionId: q.id,
+                            quizId: null,
+                            quizVersion: null,
+                            topicId: bq.topicId ?? null,
+                            type: bq.type,
+                            stem: bq.stem,
+                            options: bq.options || [],
+                            correct: key.correct ?? null,
+                            alternatives: key.alternatives || [],
+                            explanation: bq.explanation || '',
+                            confidence: confidence[q.id] ?? null,
+                            picks: wrongPicks(bq.type, answers[q.id], key.correct)
+                        },
+                        nowMs
+                    );
+                    batch.set(col.doc(q.id), { ...data, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+                    nextReviewAt = iso(data.nextReviewAt);
+                }
+                items.push({
+                    id: q.id,
+                    status,
+                    given: answers[q.id] ?? null,
+                    correct: key.correct ?? null,
+                    alternatives: key.alternatives || [],
+                    explanation: bq.explanation || '',
+                    stage: status === 'wrong' ? 0 : null,
+                    mastered: false,
+                    nextReviewAt,
+                    fresh: true
+                });
+                continue;
+            }
             const patch = applyReview(
                 doc,
                 { status, confidence: confidence[q.id] ?? null, picks: status === 'wrong' ? wrongPicks(doc.type, answers[q.id], doc.correct) : [] },
@@ -225,5 +275,60 @@ router.get(
         res.status(200).json({ status: 'success', serverNow: new Date().toISOString(), ...buildKnowledgeMap(items) });
     }
 );
+
+// ---------------------------------------------------------------------------
+// Luyện phần yếu: bộ câu luyện cho MỘT chủ đề (GET /review/practice?topicId=...&limit=10), không có đáp án.
+// Gồm câu từng sai ở chủ đề đó (đang ôn trước, sai nhiều trước) và câu đã duyệt trong ngân hàng của chính người dùng (miễn phí, không gọi AI).
+// Người không sở hữu chủ đề (vd: học sinh làm quiz của giáo viên) chỉ có câu từng sai. Chấm bằng POST /review/grade như câu ôn.
+// ---------------------------------------------------------------------------
+router.get(
+    '/practice',
+    userOnly,
+    actorLimit('review-practice', 30),
+    async (req, res) => {
+        const topicId = String(req.query.topicId || '');
+        if (!idPattern.test(topicId)) return fail(res, 400, 'Chủ đề không hợp lệ');
+        const limit = intParam(req.query.limit, 1, MAX_REVIEW_BATCH, 10);
+        const uid = req.actor.id;
+
+        const [mSnap, bSnap] = await Promise.all([
+            mistakesCol(uid).where('topicId', '==', topicId).limit(100).get(),
+            getDb()
+                .collection('questions')
+                .where('ownerId', '==', uid)
+                .where('topicId', '==', topicId)
+                .where('reviewStatus', '==', 'approved')
+                .limit(100)
+                .get()
+        ]);
+        const mistakes = mSnap.docs.map((d) => d.data());
+        const bank = bSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((q) => q.type !== 'short'); // câu trả lời ngắn không tự chấm được
+
+        const picked = pickPractice(mistakes, bank, limit);
+        res.status(200).json({
+            status: 'success',
+            serverNow: new Date().toISOString(),
+            questions: picked.map((p) => (p.kind === 'mistake' ? toReviewQuestion(p.doc) : toPracticeQuestion(p.q)))
+        });
+    }
+);
+
+// Câu đã duyệt trong ngân hàng của người dùng kèm đáp án. Câu của người khác, câu chưa duyệt, câu trả lời ngắn bị bỏ qua. -> Map(id -> { q, key })
+async function loadBank(uid, ids) {
+    const out = new Map();
+    if (!ids.length) return out;
+    const db = getDb();
+    const [qSnaps, kSnaps] = await Promise.all([
+        db.getAll(...ids.map((id) => db.collection('questions').doc(id))),
+        db.getAll(...ids.map((id) => db.collection('answerKeys').doc(id)))
+    ]);
+    qSnaps.forEach((s, i) => {
+        if (!s.exists || !kSnaps[i].exists) return;
+        const q = s.data();
+        if (q.ownerId !== uid || q.reviewStatus !== 'approved' || q.type === 'short' || !q.topicId) return;
+        out.set(s.id, { q, key: kSnaps[i].data() });
+    });
+    return out;
+}
 
 export default router;

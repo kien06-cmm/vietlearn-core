@@ -371,6 +371,12 @@ export function gradeReview(token, answers, confidence) {
   return request('/review/grade', { token, method: 'POST', body })
 }
 
+// Luyện phần yếu: bộ câu luyện cho một chủ đề (câu từng sai + câu đã duyệt trong ngân hàng của bạn), không có đáp án
+// -> { questions } cùng dạng getReviewQuestions; câu từ ngân hàng có fresh: true và stage: null. Chấm bằng gradeReview (câu sai tự vào sổ lỗi sai).
+export function getPracticeQuestions(token, { topicId, limit = 10 }) {
+  return request(`/review/practice?topicId=${encodeURIComponent(topicId)}&limit=${limit}`, { token })
+}
+
 // Bản đồ kiến thức: mức thành thạo từng chủ đề, tính trên 30 câu gần nhất (cần ≥ 5 câu mới xếp loại)
 // -> { map: [{ subject, percent, level, sample, chapters: [{ chapter, percent, level, sample, topics: [{ topicId, name, percent, level: 'new' | 'weak' | 'learning' | 'strong', sample, answered, lastAt }] }] }],
 //      weakest: [topic yếu nhất], counts: { new, weak, learning, strong } }

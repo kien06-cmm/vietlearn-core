@@ -1,7 +1,7 @@
 // Chức năng: trang Ôn tập (Phase 5) - hôm nay cần ôn bao nhiêu câu, làm bài ôn từng câu (có phản hồi ngay, cập nhật lịch 1 -> 3 -> 7 ngày), và Sổ lỗi sai (đáp án đúng, gợi ý kiểu sai, đáp án hay chọn nhầm).
 // Câu sai ở bài làm bình thường tự vào sổ khi nộp bài (chỉ tài khoản). Đáp án đúng chỉ hiện sau khi bạn đã trả lời câu đó.
 import { useCallback, useEffect, useState } from 'react'
-import { getReviewQuestions, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
+import { getPracticeQuestions, getReviewQuestions, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
 import { CONFIDENCE_LEVELS, ERROR_LABELS, ERROR_TYPES, LETTERS, isAnswered, tfText } from '../services/attemptText.js'
 import { QuestionInput } from '../components/AttemptRunner.jsx'
 import { ReviewBody } from '../components/AttemptResult.jsx'
@@ -26,10 +26,19 @@ function dueText(iso, nowMs) {
   return hours < 24 ? `Ôn lại sau ${hours} giờ` : `Ôn lại sau ${Math.ceil(hours / 24)} ngày`
 }
 
+// Dòng báo lịch ôn sau khi chấm. Câu từ ngân hàng (fresh) đúng thì không vào sổ, sai thì vừa được thêm vào sổ.
+function nextText(f) {
+  if (f.fresh) return f.status === 'correct' ? 'Câu này đúng nên không vào sổ lỗi sai.' : 'Câu này đã được thêm vào sổ lỗi sai. Ôn lại sau 1 ngày.'
+  if (f.mastered) return 'Bạn đã nắm câu này, nó sẽ không xuất hiện lại trừ khi bạn làm sai.'
+  return `Ôn lại sau ${INTERVAL_TEXT[f.stage] || '1 ngày'}.`
+}
+
 // ---------------------------------------------------------------------------
 // Làm bài ôn: mỗi lần một câu, chấm ngay để có phản hồi, lịch ôn được cập nhật ở server
+// topic ({ id, name }): luyện phần yếu của một chủ đề thay vì ôn theo lịch
 // ---------------------------------------------------------------------------
-function ReviewSession({ getToken, scope, onDone }) {
+function ReviewSession({ getToken, scope, topic, onDone }) {
+  const backText = topic ? 'Về Bản đồ kiến thức' : 'Về Ôn tập'
   const [questions, setQuestions] = useState(null) // null: đang tải
   const [error, setError] = useState('')
   const [index, setIndex] = useState(0)
@@ -43,7 +52,10 @@ function ReviewSession({ getToken, scope, onDone }) {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await getReviewQuestions(await getToken(), { scope, limit: SESSION_SIZE })
+        const token = await getToken()
+        const res = topic
+          ? await getPracticeQuestions(token, { topicId: topic.id, limit: SESSION_SIZE })
+          : await getReviewQuestions(token, { scope, limit: SESSION_SIZE })
         if (!cancelled) setQuestions(res.questions)
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -52,7 +64,7 @@ function ReviewSession({ getToken, scope, onDone }) {
     return () => {
       cancelled = true
     }
-  }, [getToken, scope])
+  }, [getToken, scope, topic])
 
   if (error && !questions) {
     return (
@@ -61,7 +73,7 @@ function ReviewSession({ getToken, scope, onDone }) {
           {error}
         </p>
         <button className="btn btn-secondary" onClick={onDone}>
-          Về Ôn tập
+          {backText}
         </button>
       </section>
     )
@@ -72,10 +84,14 @@ function ReviewSession({ getToken, scope, onDone }) {
   if (questions.length === 0) {
     return (
       <section className="card empty">
-        <h2>Không có câu nào cần ôn</h2>
-        <p className="hint">Khi bạn làm sai ở quiz hoặc phòng, câu đó sẽ vào sổ lỗi sai và quay lại đây theo lịch.</p>
+        <h2>{topic ? 'Chưa có câu để luyện' : 'Không có câu nào cần ôn'}</h2>
+        <p className="hint">
+          {topic
+            ? 'Chủ đề này chưa có câu nào bạn từng sai, và chưa có câu đã duyệt trong ngân hàng của bạn.'
+            : 'Khi bạn làm sai ở quiz hoặc phòng, câu đó sẽ vào sổ lỗi sai và quay lại đây theo lịch.'}
+        </p>
         <button className="btn btn-secondary" onClick={onDone}>
-          Về Ôn tập
+          {backText}
         </button>
       </section>
     )
@@ -85,7 +101,7 @@ function ReviewSession({ getToken, scope, onDone }) {
   if (index >= questions.length) {
     return (
       <section className="card result-card">
-        <h2>Xong lượt ôn</h2>
+        <h2>{topic ? `Xong lượt luyện: ${topic.name || 'chủ đề'}` : 'Xong lượt ôn'}</h2>
         <p className="result-sub">
           Đúng {tally.correct}/{questions.length} câu
         </p>
@@ -96,7 +112,7 @@ function ReviewSession({ getToken, scope, onDone }) {
         </div>
         <p className="hint">Câu sai sẽ quay lại sau 1 ngày. Câu đúng được hẹn lần ôn xa hơn.</p>
         <button className="btn btn-primary" onClick={onDone}>
-          Về Ôn tập
+          {backText}
         </button>
       </section>
     )
@@ -149,7 +165,9 @@ function ReviewSession({ getToken, scope, onDone }) {
       <article className="card">
         <div className="q-top">
           <span className="badge">{TYPE_LABELS[q.type] || q.type}</span>
-          <span className="badge">Lần ôn thứ {q.stage + 1}</span>
+          <span className="badge">
+            {q.fresh ? 'Câu từ ngân hàng' : q.stage < INTERVAL_TEXT.length ? `Lần ôn thứ ${q.stage + 1}` : 'Ôn lại câu đã nắm'}
+          </span>
         </div>
         <p className="q-stem">
           <MathText text={q.stem} />
@@ -203,9 +221,7 @@ function ReviewSession({ getToken, scope, onDone }) {
               </p>
             )}
             <p className="hint">
-              {feedback.mastered
-                ? 'Bạn đã nắm câu này, nó sẽ không xuất hiện lại trừ khi bạn làm sai.'
-                : `Ôn lại sau ${INTERVAL_TEXT[feedback.stage] || '1 ngày'}.`}
+              {nextText(feedback)}
               {feedback.status === 'correct' && level === 'guess' && ' Bạn đánh dấu “Đoán” nên câu này chưa được tính là đã nắm.'}
               {feedback.status === 'correct' && level === 'unsure' && ' Bạn còn phân vân nên cần thêm một lần ôn nữa trước khi coi là đã nắm.'}
             </p>
@@ -403,6 +419,7 @@ function Notebook({ getToken, onBack }) {
 export default function Review({ getToken }) {
   const [view, setView] = useState('home') // home | session | notebook | map
   const [scope, setScope] = useState('due')
+  const [practice, setPractice] = useState(null) // { id, name }: đang luyện phần yếu của một chủ đề (bắt đầu từ Bản đồ kiến thức)
   const [summary, setSummary] = useState(null) // null: đang tải
   const [error, setError] = useState('')
 
@@ -419,14 +436,27 @@ export default function Review({ getToken }) {
     loadSummary()
   }, [loadSummary])
 
+  // Luyện xong thì quay lại Bản đồ kiến thức (nó tự tải lại nên thấy mức thành thạo mới)
   function back() {
-    setView('home')
+    setView(practice ? 'map' : 'home')
+    setPractice(null)
     loadSummary()
   }
 
-  if (view === 'session') return <ReviewSession getToken={getToken} scope={scope} onDone={back} />
+  if (view === 'session') return <ReviewSession getToken={getToken} scope={scope} topic={practice} onDone={back} />
   if (view === 'notebook') return <Notebook getToken={getToken} onBack={back} />
-  if (view === 'map') return <KnowledgeMap getToken={getToken} onBack={back} />
+  if (view === 'map') {
+    return (
+      <KnowledgeMap
+        getToken={getToken}
+        onBack={back}
+        onPractice={(topic) => {
+          setPractice(topic)
+          setView('session')
+        }}
+      />
+    )
+  }
 
   function start(nextScope) {
     setScope(nextScope)
