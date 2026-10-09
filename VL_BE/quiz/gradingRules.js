@@ -5,6 +5,8 @@ import { normalizeText } from '../worker/text.js';
 export const GRACE_MS = 15_000; // dung sai mạng: nộp trễ tối đa 15 giây sau hạn vẫn được nhận
 export const MAX_EVENTS = 200; // mỗi lượt làm ghi tối đa 200 sự kiện chống gian lận
 export const EVENT_TYPES = ['tab_hidden', 'tab_visible', 'window_blur', 'window_focus', 'copy', 'paste'];
+export const CONFIDENCE_LEVELS = ['sure', 'unsure', 'guess'];
+export const MAX_CHANGES = 50;
 export const MAX_FILL_CHARS = 200;
 export const MAX_SHORT_CHARS = 300;
 
@@ -223,7 +225,7 @@ export function gradeAttempt(questions, keys, answers) {
 }
 
 // Bản xem lại sau khi nộp: đúng thứ tự và thứ tự đáp án người làm đã thấy, kèm đáp án đúng và giải thích
-export function buildReview({ questions, settings, seed, keys, answers, statuses }) {
+export function buildReview({ questions, settings, seed, keys, answers, statuses, confidence, changes }) {
     return arrange(questions, settings, seed).map(({ q, options }) => {
         const key = keys?.[q.id] || {};
         return {
@@ -235,6 +237,9 @@ export function buildReview({ questions, settings, seed, keys, answers, statuses
             correct: key.correct ?? null,
             alternatives: key.alternatives || [],
             status: statuses?.[q.id] || 'unanswered',
+            topicId: q.topicId ?? null,
+            confidence: confidence?.[q.id] ?? null,
+            changes: changes?.[q.id] ?? 0,
             explanation: q.explanation || ''
         };
     });
@@ -250,4 +255,81 @@ export function computeDeadline(startMs, timeLimitMinutes) {
 // Quá hạn khi vượt mốc hết giờ cộng dung sai GRACE_MS
 export function isPastDeadline(deadlineMs, nowMs) {
     return deadlineMs != null && nowMs > deadlineMs + GRACE_MS;
+}
+
+// ---------------------------------------------------------------------------
+// Mức tự tin + số lần đổi đáp án (Phase 5)
+// ---------------------------------------------------------------------------
+
+// Làm sạch { [questionId]: 'sure' | 'unsure' | 'guess' | null }
+export function cleanConfidence(questions, input) {
+    const ids = new Set(questions.map((q) => q.id));
+    const confidence = {};
+    const rejected = [];
+    for (const [id, value] of Object.entries(input || {})) {
+        if (!ids.has(id) || (value !== null && !CONFIDENCE_LEVELS.includes(value))) {
+            rejected.push(id);
+            continue;
+        }
+        confidence[id] = value;
+    }
+    return { confidence, rejected };
+}
+
+// Bỏ mức tự tin của câu không còn câu trả lời
+export function pruneConfidence(confidence, answers) {
+    const out = {};
+    for (const [id, level] of Object.entries(confidence || {})) {
+        if (answers?.[id] !== undefined && answers?.[id] !== null) out[id] = level;
+    }
+    return out;
+}
+
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// Đếm lần đổi đáp án: câu chọn đã có trả lời lưu sẵn và giá trị mới khác. Bỏ qua câu gõ chữ (fill, short) vì mỗi lần lưu nháp là thêm vài ký tự
+export function countChanges(prev, saved, patch, questions = []) {
+    const typed = new Set(questions.filter((q) => q.type === 'fill' || q.type === 'short').map((q) => q.id));
+    const out = { ...(prev || {}) };
+    for (const [id, value] of Object.entries(patch || {})) {
+        const before = saved?.[id];
+        if (typed.has(id) || value === null || before === undefined || before === null || sameValue(before, value)) continue;
+        out[id] = Math.min((out[id] || 0) + 1, MAX_CHANGES);
+    }
+    return out;
+}
+
+// Thống kê đúng/sai theo mức tự tin. Chỉ tính câu đã chấm (đúng/sai)
+export function summarizeConfidence(statuses, confidence) {
+    const levels = Object.fromEntries(CONFIDENCE_LEVELS.map((l) => [l, { correct: 0, wrong: 0 }]));
+    let rated = 0;
+    for (const [id, level] of Object.entries(confidence || {})) {
+        const status = statuses?.[id];
+        if (!CONFIDENCE_LEVELS.includes(level) || (status !== 'correct' && status !== 'wrong')) continue;
+        levels[level][status]++;
+        rated++;
+    }
+    return { rated, levels, sureWrong: levels.sure.wrong, guessCorrect: levels.guess.correct };
+}
+
+// Thống kê theo chủ đề, chủ đề yếu nhất lên đầu. topicInfo: { [topicId]: { subject, chapter, name } }
+export function summarizeTopics(questions, statuses, topicInfo) {
+    const map = new Map();
+    for (const q of questions) {
+        const status = statuses?.[q.id];
+        if (q.type === 'short') continue;
+        const key = q.topicId || '';
+        const t = map.get(key) || { topicId: key || null, correct: 0, wrong: 0, unanswered: 0, total: 0 };
+        t.total++;
+        if (status === 'correct') t.correct++;
+        else if (status === 'wrong') t.wrong++;
+        else t.unanswered++;
+        map.set(key, t);
+    }
+    return [...map.values()]
+        .map((t) => {
+            const info = topicInfo?.[t.topicId] || {};
+            return { ...t, name: info.name ?? null, chapter: info.chapter ?? null, subject: info.subject ?? null };
+        })
+        .sort((a, b) => a.correct / a.total - b.correct / b.total || b.total - a.total);
 }

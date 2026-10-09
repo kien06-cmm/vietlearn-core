@@ -23,4 +23,12 @@ export const STATUS_LABELS = {
 
 export const tfText = (v) => (v === true ? 'Đúng' : v === false ? 'Sai' : '')
 
+export const CONFIDENCE_LEVELS = [
+  { value: 'sure', label: 'Chắc chắn' },
+  { value: 'unsure', label: 'Phân vân' },
+  { value: 'guess', label: 'Đoán' },
+]
+
+export const CONFIDENCE_LABELS = Object.fromEntries(CONFIDENCE_LEVELS.map((c) => [c.value, c.label]))
+
 export const timeText = (d) => d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })

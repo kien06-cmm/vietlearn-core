@@ -11,7 +11,7 @@ import {
   submitAttempt,
 } from '../services/api.js'
 import { settingsText } from '../services/quizText.js'
-import { LETTERS, formatClock, isAnswered, tfText, timeText } from '../services/attemptText.js'
+import { CONFIDENCE_LEVELS, LETTERS, formatClock, isAnswered, tfText, timeText } from '../services/attemptText.js'
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
 import AttemptResult from './AttemptResult.jsx'
@@ -101,6 +101,7 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
   const [error, setError] = useState('')
   const [session, setSession] = useState(null) // { attempt, questions, resumed }
   const [answers, setAnswers] = useState({})
+  const [confidence, setConfidence] = useState({})
   const [index, setIndex] = useState(0)
   const [saveState, setSaveState] = useState('idle') // idle | dirty | saving | saved | error
   const [savedAt, setSavedAt] = useState(null)
@@ -109,7 +110,9 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
   const [result, setResult] = useState(null)
 
   const answersRef = useRef({})
+  const confidenceRef = useRef({})
   const dirtyRef = useRef(new Set())
+  const dirtyConfRef = useRef(new Set())
   const savingRef = useRef(false)
   const finishingRef = useRef(false)
   const autoFailedRef = useRef(false)
@@ -132,6 +135,9 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
       const saved = res.attempt.answers || {}
       answersRef.current = { ...saved }
       setAnswers({ ...saved })
+      const savedConf = res.attempt.confidence || {}
+      confidenceRef.current = { ...savedConf }
+      setConfidence({ ...savedConf })
       setNow(Date.now() + offsetRef.current)
       setSession({ attempt: res.attempt, questions: res.questions || [], resumed: Boolean(res.resumed) })
       setPhase('running')
@@ -148,19 +154,24 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
 
   // ---------- Lưu nháp ----------
   const flush = useCallback(async () => {
-    if (savingRef.current || !attemptId || dirtyRef.current.size === 0) return
+    if (savingRef.current || !attemptId || (dirtyRef.current.size === 0 && dirtyConfRef.current.size === 0)) return
     savingRef.current = true
     const ids = [...dirtyRef.current]
+    const confIds = [...dirtyConfRef.current]
     const patch = {}
     for (const id of ids) patch[id] = answersRef.current[id] ?? null
+    const confPatch = {}
+    for (const id of confIds) confPatch[id] = confidenceRef.current[id] ?? null
     dirtyRef.current.clear()
+    dirtyConfRef.current.clear()
     setSaveState('saving')
     try {
-      await saveAttemptAnswers(await getToken(), attemptId, patch)
-      setSaveState(dirtyRef.current.size ? 'dirty' : 'saved')
+      await saveAttemptAnswers(await getToken(), attemptId, patch, confPatch)
+      setSaveState(dirtyRef.current.size || dirtyConfRef.current.size ? 'dirty' : 'saved')
       setSavedAt(new Date())
     } catch (err) {
       ids.forEach((id) => dirtyRef.current.add(id))
+      confIds.forEach((id) => dirtyConfRef.current.add(id))
       if (err.code === 'time-up' || err.code === 'already-submitted' || err.code === 'room-ended') {
         finishRef.current?.()
       } else {
@@ -175,6 +186,24 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
     answersRef.current = { ...answersRef.current, [id]: value }
     setAnswers(answersRef.current)
     dirtyRef.current.add(id)
+    if (!isAnswered(value) && confidenceRef.current[id]) {
+      const rest = { ...confidenceRef.current }
+      delete rest[id]
+      confidenceRef.current = rest
+      setConfidence(rest)
+    }
+    setSaveState('dirty')
+    clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(flush, SAVE_DEBOUNCE_MS)
+  }
+
+  function setLevel(id, level) {
+    const next = { ...confidenceRef.current }
+    if (level) next[id] = level
+    else delete next[id]
+    confidenceRef.current = next
+    setConfidence(next)
+    dirtyConfRef.current.add(id)
     setSaveState('dirty')
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(flush, SAVE_DEBOUNCE_MS)
@@ -206,8 +235,10 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
         const token = await getToken()
         const final = {}
         for (const [id, v] of Object.entries(answersRef.current)) if (isAnswered(v)) final[id] = v
+        const finalConf = {}
+        for (const id of Object.keys(final)) finalConf[id] = confidenceRef.current[id] ?? null
         try {
-          await submitAttempt(token, attemptId, final)
+          await submitAttempt(token, attemptId, final, finalConf)
         } catch (err) {
           // Hết giờ hoặc đã nộp: bài đã được chốt ở server, cứ lấy kết quả
           if (err.code !== 'time-up' && err.code !== 'already-submitted') throw err
@@ -355,6 +386,7 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
               Hệ thống ghi nhận khi bạn chuyển tab, rời khỏi trình duyệt, sao chép hoặc dán trong lúc làm bài. Chỉ ghi nhận, bài không bị khóa.
             </li>
             <li>Đáp án đúng chỉ hiện sau khi bạn nộp bài.</li>
+            <li>Với mỗi câu, bạn có thể đánh dấu mức tự tin (chắc chắn, phân vân, đoán). Không bắt buộc, dùng để gợi ý phần cần ôn.</li>
           </ul>
           {error && (
             <p className="msg msg-error" role="alert">
@@ -446,6 +478,25 @@ export default function AttemptRunner({ getToken, quiz, roomCode, onExit, onRetr
           <MathText text={q.stem} />
         </p>
         <QuestionInput key={q.id} q={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+        {isAnswered(answers[q.id]) && q.type !== 'short' && (
+          <div className="confidence" role="radiogroup" aria-label="Mức tự tin">
+            <span className="confidence-label">Mức tự tin (không bắt buộc)</span>
+            <div className="confidence-options">
+              {CONFIDENCE_LEVELS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={confidence[q.id] === c.value}
+                  className={`confidence-btn${confidence[q.id] === c.value ? ' confidence-btn-on' : ''}`}
+                  onClick={() => setLevel(q.id, confidence[q.id] === c.value ? null : c.value)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isAnswered(answers[q.id]) && q.type !== 'fill' && q.type !== 'short' && (
           <button className="btn-link attempt-clear" onClick={() => setAnswer(q.id, null)}>
             Bỏ chọn câu này

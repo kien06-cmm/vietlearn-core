@@ -1,6 +1,7 @@
 // Chức năng: API làm bài (Phase 4) - mở lượt làm (seed + xáo trộn do server quyết định, giới hạn số lần, tiếp tục lượt đang dở), lưu nháp tự động, nộp bài (chấm ở server, nộp nhiều lần vẫn chỉ chấm một lần), xem lại kết quả, ghi sự kiện chống gian lận.
 // Đáp án đúng nằm ở quizVersionKeys và chỉ được đọc khi chấm hoặc khi xem lại SAU KHI đã nộp.
 // Lượt làm do chủ quiz tự mở (làm thử) hoặc do người trong phòng mở (POST /attempts/room, roomId = mã phòng). Phòng kết thúc thì các lượt đang dở trong phòng được nộp tự động.
+// Phase 5: ghi thêm mức tự tin và số lần đổi đáp án cho từng câu; trang xem lại trả thêm thống kê theo mức tự tin và theo chủ đề.
 import { Router } from 'express';
 import { z } from 'zod';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -8,18 +9,24 @@ import { getDb } from '../firebase.js';
 import { requireRole } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import {
+    CONFIDENCE_LEVELS,
     EVENT_TYPES,
     MAX_EVENTS,
     buildAttemptView,
     buildReview,
     cleanAnswers,
+    cleanConfidence,
     computeDeadline,
+    countChanges,
     gradeAttempt,
     isPastDeadline,
     mergeAnswers,
     newSeed,
     pickQuestionIds,
-    questionsForAttempt
+    pruneConfidence,
+    questionsForAttempt,
+    summarizeConfidence,
+    summarizeTopics
 } from '../quiz/gradingRules.js';
 import { PROGRESS_IN_PROGRESS, isRoomEnded, normalizeCode, participantKey, progressOfSubmitted } from '../quiz/roomRules.js';
 import { hub, safePublish } from '../realtime/roomHub.js';
@@ -34,6 +41,7 @@ const quizzes = () => getDb().collection('quizzes');
 const versions = () => getDb().collection('quizVersions');
 const versionKeys = () => getDb().collection('quizVersionKeys');
 const rooms = () => getDb().collection('rooms');
+const topicsCol = () => getDb().collection('topics');
 
 // Cả lớp thường chung một mạng Wi-Fi (cùng IP) nên giới hạn theo IP ở đây rộng; giới hạn chặt nằm ở từng người làm bài bên dưới
 router.use(rateLimit({ windowMs: 60_000, max: 1200, name: 'attempts-ip' }));
@@ -128,11 +136,24 @@ function toPublicAttempt(id, a) {
         submittedAt: iso(a.submittedAt),
         submitReason: a.submitReason || null, // submitted | timeout
         answers: a.answers || {},
+        confidence: a.confidence || {},
         result: a.result || null
     };
 }
 
 const deadlineOf = (a) => millisOf(a.deadlineAt);
+
+// Tên chủ đề của các câu (hiện ở trang kết quả)
+async function loadTopicInfo(questions) {
+    const ids = [...new Set(questions.map((q) => q.topicId).filter(Boolean))].slice(0, 100);
+    if (!ids.length) return {};
+    const snaps = await getDb().getAll(...ids.map((id) => topicsCol().doc(id)));
+    const info = {};
+    for (const s of snaps) {
+        if (s.exists) info[s.id] = { subject: s.data().subject, chapter: s.data().chapter, name: s.data().name };
+    }
+    return info;
+}
 
 // Trạng thái phòng được nhớ vài giây để mỗi lần lưu nháp không tốn thêm một lượt đọc Firestore
 const roomEndedCache = new Map(); // code -> { ended, at }
@@ -160,7 +181,7 @@ async function settleRoom(id, a) {
 // Chốt bài và chấm điểm. Chạy trong transaction nên nộp nhiều lần/ nộp song song vẫn chỉ chấm đúng một lần.
 // patch: câu trả lời cuối cùng đã làm sạch (bỏ qua nếu đã quá hạn: khi đó chấm theo bản đã lưu).
 // ---------------------------------------------------------------------------
-export async function finalizeAttempt(attemptId, { patch = null, reason = 'submitted' } = {}) {
+export async function finalizeAttempt(attemptId, { patch = null, confidencePatch = null, reason = 'submitted' } = {}) {
     const ref = attempts().doc(attemptId);
     const pre = await ref.get();
     if (!pre.exists) throw new AttemptError(404, 'Không tìm thấy lượt làm bài');
@@ -182,15 +203,26 @@ export async function finalizeAttempt(attemptId, { patch = null, reason = 'submi
         const nowMs = Date.now();
         const late = isPastDeadline(deadlineOf(a), nowMs);
         const answers = patch && !late ? mergeAnswers(a.answers, patch) : a.answers || {};
+        const confidence = pruneConfidence(confidencePatch && !late ? mergeAnswers(a.confidence, confidencePatch) : a.confidence, answers);
+        const changes = patch && !late ? countChanges(a.changes, a.answers, patch, qsOf(version, a)) : a.changes || {};
         const result = gradeAttempt(qsOf(version, a), keys, answers);
         const submitReason = late ? 'timeout' : reason;
         const submittedAt = new Date(nowMs);
 
-        tx.update(ref, { status: 'submitted', answers, result, submittedAt, submitReason, updatedAt: FieldValue.serverTimestamp() });
+        tx.update(ref, {
+            status: 'submitted',
+            answers,
+            confidence,
+            changes,
+            result,
+            submittedAt,
+            submitReason,
+            updatedAt: FieldValue.serverTimestamp()
+        });
         // Giải phóng "lượt đang làm" để người làm có thể mở lượt mới (nếu còn số lần)
         tx.set(counterRef, { activeAttemptId: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         if (pRef) tx.set(pRef, { attemptId, ...progressOfSubmitted(result, submitReason) }, { merge: true });
-        return { already: false, attempt: { ...a, status: 'submitted', answers, result, submittedAt, submitReason } };
+        return { already: false, attempt: { ...a, status: 'submitted', answers, confidence, changes, result, submittedAt, submitReason } };
     });
 
     // Chủ phòng thấy điểm ngay khi có người nộp (đẩy sau khi đã lưu xong; lỗi đẩy tin không ảnh hưởng việc chấm)
@@ -255,6 +287,8 @@ async function openAttempt({ actor, quizId, versionNumber, roomId = null, overri
                 questionIds: pickQuestionIds(version.questions, overrides?.questionLimit ?? null, seed),
                 status: 'in_progress',
                 answers: {},
+                confidence: {},
+                changes: {},
                 events: [],
                 timeLimitMinutes: timeLimit,
                 startedAt: new Date(nowMs),
@@ -323,8 +357,15 @@ const answersMap = z
     .record(z.string().min(1).max(100), z.unknown())
     .refine((m) => Object.keys(m).length <= 100, 'Tối đa 100 câu');
 
-const saveSchema = z.object({ answers: answersMap }).strict();
-const submitSchema = z.object({ answers: answersMap.optional() }).strict();
+const confidenceMap = z
+    .record(z.string().min(1).max(100), z.enum(CONFIDENCE_LEVELS).nullable())
+    .refine((m) => Object.keys(m).length <= 100, 'Tối đa 100 câu');
+
+const saveSchema = z
+    .object({ answers: answersMap.optional(), confidence: confidenceMap.optional() })
+    .strict()
+    .refine((v) => v.answers || v.confidence);
+const submitSchema = z.object({ answers: answersMap.optional(), confidence: confidenceMap.optional() }).strict();
 const eventSchema = z.object({ type: z.enum(EVENT_TYPES) }).strict();
 
 // ---------------------------------------------------------------------------
@@ -465,8 +506,10 @@ router.put(
             return fail(res, 409, 'Phòng đã kết thúc, bài của bạn đã được nộp', 'room-ended');
         }
 
-        const version = await loadVersion(a.quizId, a.quizVersion);
-        const { answers: patch, rejected } = cleanAnswers(qsOf(version, a), parsed.data.answers);
+        const qs = qsOf(await loadVersion(a.quizId, a.quizVersion), a);
+        const { answers: patch, rejected: badAnswers } = cleanAnswers(qs, parsed.data.answers);
+        const { confidence: confPatch, rejected: badConf } = cleanConfidence(qs, parsed.data.confidence);
+        const rejected = [...badAnswers, ...badConf];
 
         const outcome = await getDb().runTransaction(async (tx) => {
             const fresh = await tx.get(snap.ref);
@@ -474,7 +517,10 @@ router.put(
             if (cur.status !== 'in_progress') return 'submitted';
             if (isPastDeadline(deadlineOf(cur), Date.now())) return 'time-up';
             const savedAt = new Date();
-            tx.update(snap.ref, { answers: mergeAnswers(cur.answers, patch), savedAt, updatedAt: FieldValue.serverTimestamp() });
+            const answers = mergeAnswers(cur.answers, patch);
+            const confidence = pruneConfidence(mergeAnswers(cur.confidence, confPatch), answers);
+            const changes = countChanges(cur.changes, cur.answers, patch, qs);
+            tx.update(snap.ref, { answers, confidence, changes, savedAt, updatedAt: FieldValue.serverTimestamp() });
             return savedAt;
         });
 
@@ -500,12 +546,14 @@ router.post(
         const a = snap.data();
 
         let patch = null;
-        if (a.status === 'in_progress' && parsed.data.answers) {
-            const version = await loadVersion(a.quizId, a.quizVersion);
-            patch = cleanAnswers(qsOf(version, a), parsed.data.answers).answers;
+        let confidencePatch = null;
+        if (a.status === 'in_progress' && (parsed.data.answers || parsed.data.confidence)) {
+            const qs = qsOf(await loadVersion(a.quizId, a.quizVersion), a);
+            if (parsed.data.answers) patch = cleanAnswers(qs, parsed.data.answers).answers;
+            if (parsed.data.confidence) confidencePatch = cleanConfidence(qs, parsed.data.confidence).confidence;
         }
 
-        const out = await finalizeAttempt(snap.id, { patch, reason: 'submitted' });
+        const out = await finalizeAttempt(snap.id, { patch, confidencePatch, reason: 'submitted' });
         res.status(200).json({
             status: 'success',
             already: out.already,
@@ -532,17 +580,23 @@ router.get(
         if (a.status !== 'submitted') return fail(res, 409, 'Nộp bài xong mới xem được đáp án', 'not-submitted');
 
         const [version, keys] = await Promise.all([loadVersion(a.quizId, a.quizVersion), loadKeys(a.quizId, a.quizVersion)]);
+        const qs = qsOf(version, a);
+        const topicInfo = await loadTopicInfo(qs);
         res.status(200).json({
             status: 'success',
             attempt: toPublicAttempt(snap.id, a),
             review: buildReview({
-                questions: qsOf(version, a),
+                questions: qs,
                 settings: version.settings,
                 seed: a.seed,
                 keys,
                 answers: a.answers,
-                statuses: a.result?.statuses
-            })
+                statuses: a.result?.statuses,
+                confidence: a.confidence,
+                changes: a.changes
+            }),
+            confidenceSummary: summarizeConfidence(a.result?.statuses, a.confidence),
+            topics: summarizeTopics(qs, a.result?.statuses, topicInfo)
         });
     })
 );

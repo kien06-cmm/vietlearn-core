@@ -8,12 +8,17 @@ import {
     buildReview,
     cleanAnswer,
     cleanAnswers,
+    cleanConfidence,
     computeDeadline,
+    countChanges,
     gradeAttempt,
     isPastDeadline,
     mergeAnswers,
     normalizeFill,
-    seededShuffle
+    pruneConfidence,
+    seededShuffle,
+    summarizeConfidence,
+    summarizeTopics
 } from '../quiz/gradingRules.js';
 
 const questions = [
@@ -216,4 +221,78 @@ test('hạn nộp: có dung sai mạng sau mốc hết giờ', () => {
     assert.equal(isPastDeadline(deadline, deadline), false);
     assert.equal(isPastDeadline(deadline, deadline + GRACE_MS), false);
     assert.equal(isPastDeadline(deadline, deadline + GRACE_MS + 1), true);
+});
+
+// ---------- Mức tự tin + đổi đáp án (Phase 5) ----------
+test('cleanConfidence: chỉ nhận 3 mức, null để xóa, loại câu không thuộc đề', () => {
+    const { confidence, rejected } = cleanConfidence(questions, { q1: 'sure', q2: 'guess', q3: null, q4: 'maybe', zzz: 'sure' });
+    assert.deepEqual(confidence, { q1: 'sure', q2: 'guess', q3: null });
+    assert.deepEqual(rejected.sort(), ['q4', 'zzz']);
+});
+
+test('pruneConfidence: bỏ mức tự tin của câu không còn câu trả lời', () => {
+    assert.deepEqual(pruneConfidence({ q1: 'sure', q2: 'guess' }, { q1: 0 }), { q1: 'sure' });
+    assert.deepEqual(pruneConfidence({ q1: 'sure' }, { q1: false }), { q1: 'sure' });
+    assert.deepEqual(pruneConfidence(undefined, {}), {});
+});
+
+test('countChanges: chỉ đếm khi câu đã lưu và giá trị mới khác', () => {
+    const saved = { q1: 1, q2: [0, 3] };
+    assert.deepEqual(countChanges({}, saved, { q1: 2 }), { q1: 1 });
+    assert.deepEqual(countChanges({ q1: 1 }, saved, { q1: 3 }), { q1: 2 });
+    assert.deepEqual(countChanges({}, saved, { q1: 1, q2: [0, 3] }), {});
+    assert.deepEqual(countChanges({}, saved, { q1: null, q3: true }), {});
+    assert.deepEqual(countChanges({}, saved, { q2: [1] }), { q2: 1 });
+    const typed = [{ id: 'f', type: 'fill' }, { id: 's', type: 'short' }, { id: 'q1', type: 'single' }];
+    assert.deepEqual(countChanges({}, { f: 'ab', s: 'x', q1: 1 }, { f: 'abc', s: 'xy', q1: 2 }, typed), { q1: 1 });
+});
+
+test('summarizeConfidence: chỉ tính câu đã chấm, đếm chắc chắn nhưng sai và đoán trúng', () => {
+    const statuses = { q1: 'wrong', q2: 'correct', q3: 'correct', q4: 'unanswered', q5: 'pending' };
+    const s = summarizeConfidence(statuses, { q1: 'sure', q2: 'guess', q3: 'sure', q4: 'unsure', q5: 'sure' });
+    assert.equal(s.rated, 3);
+    assert.deepEqual(s.levels.sure, { correct: 1, wrong: 1 });
+    assert.deepEqual(s.levels.guess, { correct: 1, wrong: 0 });
+    assert.deepEqual(s.levels.unsure, { correct: 0, wrong: 0 });
+    assert.equal(s.sureWrong, 1);
+    assert.equal(s.guessCorrect, 1);
+});
+
+test('summarizeTopics: gộp theo chủ đề, bỏ câu trả lời ngắn, chủ đề yếu nhất lên đầu', () => {
+    const qs = [
+        { id: 'a', type: 'single', topicId: 't1' },
+        { id: 'b', type: 'single', topicId: 't1' },
+        { id: 'c', type: 'fill', topicId: 't2' },
+        { id: 'd', type: 'short', topicId: 't2' },
+        { id: 'e', type: 'truefalse', topicId: 't2' }
+    ];
+    const statuses = { a: 'correct', b: 'wrong', c: 'wrong', d: 'pending', e: 'unanswered' };
+    const info = { t1: { subject: 'Toán', chapter: 'Chương 1', name: 'Hàm số' } };
+    const out = summarizeTopics(qs, statuses, info);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].topicId, 't2');
+    assert.deepEqual([out[0].correct, out[0].wrong, out[0].unanswered, out[0].total], [0, 1, 1, 2]);
+    assert.equal(out[0].name, null);
+    assert.equal(out[1].name, 'Hàm số');
+    assert.equal(out[1].subject, 'Toán');
+});
+
+test('bản xem lại có mức tự tin, số lần đổi và chủ đề', () => {
+    const qs = [{ ...byId('q1'), topicId: 't1' }];
+    const review = buildReview({
+        questions: qs,
+        settings: SHUFFLE_NONE,
+        seed: 1,
+        keys,
+        answers: { q1: 2 },
+        statuses: { q1: 'correct' },
+        confidence: { q1: 'sure' },
+        changes: { q1: 2 }
+    });
+    assert.equal(review[0].topicId, 't1');
+    assert.equal(review[0].confidence, 'sure');
+    assert.equal(review[0].changes, 2);
+    const bare = buildReview({ questions: qs, settings: SHUFFLE_NONE, seed: 1, keys, answers: {}, statuses: {} });
+    assert.equal(bare[0].confidence, null);
+    assert.equal(bare[0].changes, 0);
 });

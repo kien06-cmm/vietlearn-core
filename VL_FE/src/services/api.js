@@ -258,16 +258,25 @@ export function getAttempt(token, id) {
 }
 
 // Lưu nháp: chỉ gửi các câu vừa đổi -> { savedAt, rejected }. Quá giờ thì backend trả 409 code 'time-up'.
-export function saveAttemptAnswers(token, id, answers) {
-  return request(`/attempts/${id}/answers`, { token, method: 'PUT', body: { answers } })
+// confidence (tuỳ chọn): { [questionId]: 'sure' | 'unsure' | 'guess' | null }
+export function saveAttemptAnswers(token, id, answers, confidence) {
+  const body = {}
+  if (answers && Object.keys(answers).length) body.answers = answers
+  if (confidence && Object.keys(confidence).length) body.confidence = confidence
+  return request(`/attempts/${id}/answers`, { token, method: 'PUT', body })
 }
 
-// Nộp bài (có thể kèm câu trả lời cuối). Nộp lại bài đã nộp trả lại kết quả cũ -> { already, submitReason, result }
-export function submitAttempt(token, id, answers) {
-  return request(`/attempts/${id}/submit`, { token, method: 'POST', body: answers ? { answers } : {} })
+// Nộp bài (có thể kèm câu trả lời và mức tự tin cuối). Nộp lại bài đã nộp trả lại kết quả cũ -> { already, submitReason, result }
+export function submitAttempt(token, id, answers, confidence) {
+  const body = {}
+  if (answers) body.answers = answers
+  if (confidence) body.confidence = confidence
+  return request(`/attempts/${id}/submit`, { token, method: 'POST', body })
 }
 
-// Xem lại sau khi nộp: { attempt, review: [{ id, type, stem, options, given, correct, status, explanation }] }
+// Xem lại sau khi nộp: { attempt, review: [{ id, type, stem, options, given, correct, status, explanation, topicId, confidence, changes }],
+//   confidenceSummary: { rated, levels: { sure|unsure|guess: { correct, wrong } }, sureWrong, guessCorrect },
+//   topics: [{ topicId, name, chapter, subject, correct, wrong, unanswered, total }] }
 export function getAttemptResult(token, id) {
   return request(`/attempts/${id}/result`, { token })
 }

@@ -1,6 +1,6 @@
 // Chức năng: kết quả sau khi nộp bài (Phase 4) - điểm, số câu đúng/sai/bỏ qua, và xem lại từng câu với đáp án đúng và giải thích.
 import { useState } from 'react'
-import { LETTERS, STATUS_LABELS, tfText } from '../services/attemptText.js'
+import { CONFIDENCE_LABELS, CONFIDENCE_LEVELS, LETTERS, STATUS_LABELS, tfText } from '../services/attemptText.js'
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
 import { TYPE_LABELS } from './QuestionCard.jsx'
@@ -68,9 +68,70 @@ function ReviewBody({ item }) {
   )
 }
 
+// Thống kê đúng/sai theo mức tự tin + gợi ý
+function ConfidenceSummary({ summary }) {
+  if (!summary || summary.rated === 0) return null
+  return (
+    <section className="card">
+      <h2>Mức tự tin của bạn</h2>
+      <ul className="conf-rows">
+        {CONFIDENCE_LEVELS.map((c) => {
+          const l = summary.levels[c.value]
+          const total = l.correct + l.wrong
+          if (!total) return null
+          return (
+            <li key={c.value} className="conf-row">
+              <span>{c.label}</span>
+              <strong>
+                Đúng {l.correct}/{total}
+              </strong>
+            </li>
+          )
+        })}
+      </ul>
+      {summary.sureWrong > 0 && (
+        <p className="hint">
+          Gợi ý: {summary.sureWrong} câu bạn chọn “Chắc chắn” nhưng sai. Nên xem lại cách hiểu ở những câu này.
+        </p>
+      )}
+      {summary.guessCorrect > 0 && (
+        <p className="hint">Gợi ý: {summary.guessCorrect} câu bạn đoán trúng. Chưa chắc đã nắm kiến thức, nên ôn lại.</p>
+      )}
+    </section>
+  )
+}
+
+// Kết quả theo chủ đề, chủ đề yếu nhất lên đầu
+function TopicSummary({ topics }) {
+  return (
+    <section className="card">
+      <h2>Theo chủ đề</h2>
+      <ul className="topic-rows">
+        {topics.map((t) => {
+          const pct = Math.round((t.correct / t.total) * 100)
+          return (
+            <li key={t.topicId || 'none'} className="topic-row">
+              <div className="topic-row-head">
+                <span>{t.name || 'Chưa rõ chủ đề'}</span>
+                <strong>
+                  {t.correct}/{t.total}
+                </strong>
+              </div>
+              {(t.subject || t.chapter) && <span className="hint">{[t.subject, t.chapter].filter(Boolean).join(' · ')}</span>}
+              <div className="topic-bar" role="img" aria-label={`Đúng ${pct}%`}>
+                <div className="topic-bar-fill" style={{ width: `${pct}%` }} />
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về danh sách quiz' }) {
   const [onlyMissed, setOnlyMissed] = useState(false)
-  const { attempt, review } = res
+  const { attempt, review, confidenceSummary, topics } = res
   const r = attempt.result
   const shown = onlyMissed ? review.filter((x) => x.status === 'wrong' || x.status === 'unanswered') : review
   const missed = review.filter((x) => x.status === 'wrong' || x.status === 'unanswered').length
@@ -121,6 +182,9 @@ export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về 
         </div>
       </section>
 
+      <ConfidenceSummary summary={confidenceSummary} />
+      {topics?.length > 0 && <TopicSummary topics={topics} />}
+
       <section>
         <h2>Xem lại bài</h2>
         {missed > 0 && (
@@ -139,6 +203,8 @@ export default function AttemptResult({ res, onExit, onRetry, exitLabel = 'Về 
               <span className="badge">Câu {no}</span>
               <span className="badge">{TYPE_LABELS[item.type] || item.type}</span>
               <span className={`badge review-status review-status-${item.status}`}>{STATUS_LABELS[item.status]}</span>
+              {item.confidence && <span className="badge">Tự tin: {CONFIDENCE_LABELS[item.confidence]}</span>}
+              {item.changes > 0 && <span className="badge">Đổi đáp án {item.changes} lần</span>}
             </div>
             <p className="q-stem">
               <MathText text={item.stem} />
