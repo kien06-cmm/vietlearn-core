@@ -13,6 +13,7 @@ import { MAX_IMPORT_BYTES, ImportFileError, readImportFile } from '../ai/importF
 import { finalizeImport } from '../ai/importRules.js';
 import { SAMPLE_FORMATS, buildSample } from '../ai/importSamples.js';
 import { wakeWorker } from '../worker/index.js';
+import { aiCooldown } from '../ai/cooldown.js';
 
 const router = Router();
 const userOnly = requireRole(['user']);
@@ -65,7 +66,13 @@ function rebuildRaw(q, key, patch = {}) {
 router.get('/credits', userOnly, async (req, res) => {
     const plan = getPlan(req.profile.plan);
     const balance = await getBalance(req.actor.id, creditLimits(plan));
-    res.status(200).json({ status: 'success', credits: balance });
+    // aiPause: Gemini đang tạm nghỉ do vượt hạn mức => giao diện báo người dùng và tạm khóa nút gọi AI
+    const pauseMs = aiCooldown.remainingMs();
+    res.status(200).json({
+        status: 'success',
+        credits: balance,
+        aiPause: pauseMs > 0 ? { until: new Date(Date.now() + pauseMs).toISOString() } : null
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -172,6 +179,11 @@ router.get(
                 status: j.status,
                 progress: j.progress || null,
                 error: j.error || null,
+                // Mã lỗi gần nhất (vd ai-rate-limit) và thời điểm hệ thống tự thử lại, để giao diện giải thích việc đang chờ
+                errorCode: j.lastError?.code ?? null,
+                retryAt: j.status === 'queued' && j.lastError ? iso(j.runAfter) : null,
+                attempts: j.attempts || 0,
+                maxAttempts: j.maxAttempts || 3,
                 result: j.result || null
             }
         });

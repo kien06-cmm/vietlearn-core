@@ -76,15 +76,16 @@ function handleAiError(res, err) {
     }
     if (err instanceof AIError) {
         log('error', 'AI lỗi', { code: err.code, error: err.message });
-        // Gemini yêu cầu chờ bao lâu thì báo cho client qua header Retry-After (giây)
+        // Gemini yêu cầu chờ bao lâu thì báo cho client qua header Retry-After (giây) và trường retryAfter trong thân (giao diện ưu tiên thân)
         if (err.retryAfterMs) res.set('Retry-After', String(Math.ceil(err.retryAfterMs / 1000)));
+        const retryAfter = err.retryAfterMs ? Math.ceil(err.retryAfterMs / 1000) : undefined;
         if (err.code === 'ai-quota-daily') {
-            return fail(res, 429, 'AI đã hết hạn mức hôm nay, vui lòng thử lại sau', 'ai-unavailable');
+            return fail(res, 429, 'AI đã hết hạn mức hôm nay, vui lòng thử lại sau', 'ai-unavailable', { retryAfter, reason: 'quota-daily' });
         }
         const overloaded = ['ai-busy', 'ai-cooldown', 'ai-rate-limit'].includes(err.code);
         const status = err.code === 'ai-no-key' ? 503 : overloaded ? 429 : 502;
         const message = overloaded ? 'AI đang quá tải, vui lòng thử lại sau ít phút' : 'AI tạm thời chưa xử lý được, vui lòng thử lại sau';
-        return fail(res, status, message, 'ai-unavailable');
+        return fail(res, status, message, 'ai-unavailable', { retryAfter, reason: overloaded ? 'overloaded' : 'unavailable' });
     }
     throw err;
 }

@@ -1,7 +1,8 @@
 // Chức năng: hiển thị AI credits - thẻ đầy đủ (thanh còn lại, đếm ngược tới lúc làm mới, thông báo khi hết) và chip nhỏ trên thanh đầu trang.
-import { useCountdown, useCredits } from '../hooks/useCredits.jsx'
+import { useAiPause, useCountdown, useCredits } from '../hooks/useCredits.jsx'
 import { formatCountdown, formatCountdownShort, formatResetAt, resetDate } from '../services/credits.js'
 import Icon from './Icon.jsx'
+import './AiPause.css'
 
 const LOW_RATIO = 0.2 // còn dưới 20% thì đổi sang màu cảnh báo nhẹ
 
@@ -87,6 +88,28 @@ export default function CreditCard({ compact = false, note }) {
         </p>
       )}
     </section>
+  )
+}
+
+// Thông báo khi Gemini quá tải/hết hạn mức: AI tạm nghỉ, đếm ngược tới lúc dùng lại. Tự biến mất khi hết giờ nghỉ.
+export function AiPauseNotice() {
+  const { paused, left } = useAiPause()
+  if (!paused) return null
+
+  return (
+    <div className="ai-pause" role="status">
+      <Icon name="clock" size={18} />
+      <div>
+        <p>
+          <strong>AI đang tạm nghỉ vì quá tải hoặc hết hạn mức.</strong> Dùng lại được sau{' '}
+          <b className="count" aria-live="off">
+            {formatCountdown(left)}
+          </b>
+          .
+        </p>
+        <p className="hint">Credits của bạn không bị trừ. Trong lúc chờ bạn vẫn đọc, ghim và duyệt câu hỏi bình thường.</p>
+      </div>
+    </div>
   )
 }
 

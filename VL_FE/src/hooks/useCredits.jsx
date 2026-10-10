@@ -6,22 +6,31 @@ import { resetDate } from '../services/credits.js'
 
 const MAX_TIMEOUT = 2 ** 31 - 1 // setTimeout vượt mức này sẽ chạy ngay lập tức
 
-const CreditsContext = createContext({ credits: null, reload: async () => {} })
+const CreditsContext = createContext({ credits: null, reload: async () => {}, aiUntil: null, pauseAi: () => {} })
 
 export function CreditsProvider({ user, getToken, children }) {
   const [credits, setCredits] = useState(null)
+  const [aiUntil, setAiUntil] = useState(null) // Date: AI tạm nghỉ (Gemini quá tải) tới lúc này, dùng chung cho mọi màn hình
+
+  // Ghi nhận AI tạm nghỉ tới `until`; không bao giờ rút ngắn mốc đang có
+  const pauseAi = useCallback((until) => setAiUntil((cur) => (cur && cur > until ? cur : until)), [])
 
   const reload = useCallback(async () => {
     try {
-      setCredits((await getCredits(await getToken())).credits)
+      const res = await getCredits(await getToken())
+      setCredits(res.credits)
+      if (res.aiPause?.until) pauseAi(new Date(res.aiPause.until))
     } catch {
       // không lấy được thì thôi, backend vẫn kiểm tra quota khi dùng
     }
-  }, [getToken])
+  }, [getToken, pauseAi])
 
   useEffect(() => {
     if (user) reload()
-    else setCredits(null)
+    else {
+      setCredits(null)
+      setAiUntil(null)
+    }
   }, [user, reload])
 
   // Tới giờ làm mới thì tải lại số dư để giao diện báo đã có credits trở lại
@@ -44,11 +53,18 @@ export function CreditsProvider({ user, getToken, children }) {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [resetAtMs, reload])
 
-  return <CreditsContext.Provider value={{ credits, reload }}>{children}</CreditsContext.Provider>
+  return <CreditsContext.Provider value={{ credits, reload, aiUntil, pauseAi }}>{children}</CreditsContext.Provider>
 }
 
 export function useCredits() {
   return useContext(CreditsContext)
+}
+
+// Trạng thái AI tạm nghỉ: paused (đang nghỉ), left (ms còn lại), pauseAi(mốc Date) để ghi nhận khi gặp lỗi 429
+export function useAiPause() {
+  const { aiUntil, pauseAi } = useContext(CreditsContext)
+  const left = useCountdown(aiUntil)
+  return { paused: left !== null && left > 0, left: left ?? 0, pauseAi }
 }
 
 // Số mili giây còn lại tới `target` (Date). Mỗi giây cập nhật khi còn dưới 1 giờ, còn lại 30 giây một lần.

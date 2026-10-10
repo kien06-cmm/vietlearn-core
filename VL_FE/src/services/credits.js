@@ -68,3 +68,41 @@ export function creditErrorText(err) {
   const wait = formatCountdown(at.getTime() - Date.now())
   return `${err.message}. Credits làm mới sau ${wait} (lúc ${formatResetAt(at)}).`
 }
+
+// ---------- AI tạm nghỉ (Gemini báo quá tải / hết hạn mức, backend trả 429 mã 'ai-unavailable') ----------
+
+export const DEFAULT_AI_PAUSE_MS = 60_000 // khớp mức nghỉ mặc định của backend khi Gemini không gợi ý
+
+export const isAiPauseError = (err) => err?.status === 429 && err?.code === 'ai-unavailable'
+
+// Mốc AI dùng lại được (Date) nếu lỗi là AI quá tải, ngược lại trả null
+export function aiPauseUntil(err) {
+  return isAiPauseError(err) ? new Date(Date.now() + (err.retryAfterMs ?? DEFAULT_AI_PAUSE_MS)) : null
+}
+
+// Thông báo khi gọi AI lỗi: giải thích rõ lý do, nói credits không bị trừ, và bảo khi nào thử lại được
+export function aiErrorText(err) {
+  if (err?.code === 'quota-credits') return creditErrorText(err)
+  if (!isAiPauseError(err)) return err?.message || 'Có lỗi xảy ra, vui lòng thử lại.'
+  const wait = err.retryAfterMs ? ` Thử lại sau khoảng ${formatCountdown(err.retryAfterMs)}.` : ' Vui lòng thử lại sau ít phút.'
+  const head = err.reason === 'quota-daily' ? 'AI đã hết hạn mức hôm nay.' : 'AI đang quá tải.'
+  return `${head} Credits của bạn không bị trừ.${wait}`
+}
+
+// Lý do job đang chờ thử lại, theo mã lỗi backend ghi trên job (null = không phải lỗi do AI quá tải)
+const JOB_WAIT_REASON = {
+  'ai-rate-limit': 'AI đang quá tải',
+  'ai-cooldown': 'AI đang tạm nghỉ do quá tải',
+  'ai-quota-daily': 'AI đã hết hạn mức hôm nay',
+}
+
+export const jobWaitReason = (code) => JOB_WAIT_REASON[code] ?? null
+
+// Thông báo khi job tạo câu hỏi thất bại hẳn. Lỗi AI thì nói rõ nguyên nhân (không hiện thông báo kỹ thuật như "AI lỗi 429"), lỗi khác giữ nguyên thông điệp từ backend.
+export function jobFailText(job) {
+  if (job.errorCode === 'ai-quota-daily') return 'AI đã hết hạn mức hôm nay, hãy thử lại sau.'
+  if (job.errorCode === 'ai-rate-limit' || job.errorCode === 'ai-cooldown') {
+    return 'AI quá tải trong nhiều lần thử liên tiếp nên chưa tạo được câu hỏi. Hãy thử lại sau ít phút.'
+  }
+  return job.error || 'Tạo câu hỏi thất bại.'
+}
