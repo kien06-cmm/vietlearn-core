@@ -54,7 +54,7 @@ async function loadChunks(docRef) {
 // Giữ chỗ credits -> chạy work() -> chốt. work() ném lỗi => hoàn toàn bộ. Chốt lỗi thì chỉ ghi log (không làm hỏng phản hồi).
 async function withCredits({ uid, plan, cost, kind, work }) {
     const jobId = `${kind}_${randomUUID()}`;
-    const { period } = await reserveCredits({ uid, jobId, amount: cost, limit: creditLimits(plan) });
+    await reserveCredits({ uid, jobId, amount: cost, limit: creditLimits(plan) });
 
     let actual = 0;
     try {
@@ -62,7 +62,7 @@ async function withCredits({ uid, plan, cost, kind, work }) {
         actual = cost;
         return result;
     } finally {
-        await settleCredits({ uid, jobId, period, reserved: cost, actual }).catch((err) => {
+        await settleCredits({ uid, jobId, actual }).catch((err) => {
             captureError(err, { jobId, kind });
             log('error', 'Không chốt được credits', { jobId, kind, error: err.message });
         });
@@ -76,8 +76,15 @@ function handleAiError(res, err) {
     }
     if (err instanceof AIError) {
         log('error', 'AI lỗi', { code: err.code, error: err.message });
-        const status = err.code === 'ai-no-key' ? 503 : 502;
-        return fail(res, status, 'AI tạm thời chưa xử lý được, vui lòng thử lại sau', 'ai-unavailable');
+        // Gemini yêu cầu chờ bao lâu thì báo cho client qua header Retry-After (giây)
+        if (err.retryAfterMs) res.set('Retry-After', String(Math.ceil(err.retryAfterMs / 1000)));
+        if (err.code === 'ai-quota-daily') {
+            return fail(res, 429, 'AI đã hết hạn mức hôm nay, vui lòng thử lại sau', 'ai-unavailable');
+        }
+        const overloaded = ['ai-busy', 'ai-cooldown', 'ai-rate-limit'].includes(err.code);
+        const status = err.code === 'ai-no-key' ? 503 : overloaded ? 429 : 502;
+        const message = overloaded ? 'AI đang quá tải, vui lòng thử lại sau ít phút' : 'AI tạm thời chưa xử lý được, vui lòng thử lại sau';
+        return fail(res, status, message, 'ai-unavailable');
     }
     throw err;
 }

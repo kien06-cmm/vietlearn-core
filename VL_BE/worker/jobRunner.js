@@ -6,16 +6,14 @@ import { getPlan } from '../config/plans.js';
 import { captureError } from '../monitoring.js';
 import { extractPages, UserError } from './extract.js';
 import { buildChunks } from './text.js';
-import { AIError } from '../ai/provider.js';
-import { settleCredits } from '../credits.js';
+import { settleFailure } from './failure.js';
 import { processGenerateQuestions } from './generateQuestions.js';
 import { processGeneratePractice } from './generatePractice.js';
+import { selectReady } from './queueRules.js';
 
 const NOT_FOUND = 5; // mã lỗi gRPC khi document không còn tồn tại
 const PROGRESS_EVERY = 5; // ghi tiến độ mỗi 5 trang (tiết kiệm lượt ghi Firestore)
 const BATCH_SIZE = 400; // Firestore giới hạn 500 thao tác / batch
-const BACKOFF_BASE_MS = 30_000;
-const BACKOFF_MAX_MS = 10 * 60_000;
 const STALE_MS = 10 * 60_000; // job "running" quá 10 phút không cập nhật => worker đã chết
 const STALE_UPLOAD_MS = 24 * 60 * 60_000; // tài liệu kẹt ở "uploading" quá 24 giờ => dọn
 
@@ -27,19 +25,18 @@ const docsCol = () => db().collection('documents');
 class Cancelled extends Error {}
 
 const isNotFound = (err) => err?.code === NOT_FOUND;
-const backoffMs = (attempts) => Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS);
 
 function log(level, message, extra = {}) {
     console.log(JSON.stringify({ time: new Date().toISOString(), level, scope: 'worker', message, ...extra }));
 }
 
 // Lấy 1 job sẵn sàng chạy và "giữ chỗ" bằng transaction (2 worker không lấy trùng một job)
-export async function claimNextJob() {
-    const snap = await jobsCol().where('status', '==', 'queued').limit(20).get();
+// excludeTypes: loại job tạm thời không nhận (vd job dùng Gemini khi hệ thống đang tạm nghỉ vì 429)
+export async function claimNextJob({ excludeTypes = [] } = {}) {
+    // Khi loại bớt job AI, đọc nhiều hơn để job không dùng AI (vd trích văn bản) không bị che khuất phía sau
+    const snap = await jobsCol().where('status', '==', 'queued').limit(excludeTypes.length ? 100 : 20).get();
     const now = Date.now() + 5000; // dung sai lệch đồng hồ giữa server và Firestore
-    const ready = snap.docs
-        .filter((d) => (d.data().runAfter?.toMillis?.() ?? 0) <= now)
-        .sort((a, b) => a.data().runAfter.toMillis() - b.data().runAfter.toMillis());
+    const ready = selectReady(snap.docs, now, excludeTypes);
 
     for (const d of ready) {
         const claimed = await db().runTransaction(async (tx) => {
@@ -104,59 +101,6 @@ async function writeChunks(docRef, chunks) {
         }
         await batch.commit();
     }
-}
-
-// Lỗi tạm thời: retry có backoff; hết lượt thì dead-letter. Lỗi do người dùng (UserError): thất bại ngay.
-async function settleFailure(job, err) {
-    const jobRef = jobsCol().doc(job.id);
-    const attempts = job.attempts || 1;
-    const maxAttempts = job.maxAttempts || 3;
-    const affectsDocument = job.type === 'extract_document' && !!job.documentId;
-
-    let jobUpdate;
-    let docUpdate;
-
-    if (err instanceof UserError) {
-        jobUpdate = { status: 'failed', error: err.message, deadLetter: false };
-        docUpdate = { status: 'failed', error: err.message };
-    } else if (err instanceof AIError && !err.retryable) {
-        // Lỗi AI không thể thử lại (thiếu key, nội dung bị chặn, bị cắt...): thất bại ngay, chi tiết chỉ ghi log
-        log('error', 'AI lỗi không thể thử lại', { jobId: job.id, code: err.code, error: err.message });
-        jobUpdate = { status: 'failed', error: 'AI không xử lý được nội dung này', deadLetter: false };
-        docUpdate = { status: 'failed', error: 'AI không xử lý được nội dung này' };
-    } else if (attempts >= maxAttempts) {
-        jobUpdate = { status: 'failed', error: String(err.message).slice(0, 300), deadLetter: true };
-        docUpdate = { status: 'failed', error: 'Xử lý thất bại, vui lòng thử lại sau' };
-    } else {
-        jobUpdate = {
-            status: 'queued',
-            error: String(err.message).slice(0, 300),
-            runAfter: Timestamp.fromMillis(Date.now() + backoffMs(attempts))
-        };
-        docUpdate = { status: 'queued', error: null };
-    }
-
-    await jobRef.update({ ...jobUpdate, updatedAt: FieldValue.serverTimestamp() });
-
-    // Job dùng AI credits mà thất bại hẳn (không còn retry) => hoàn toàn bộ credits đã giữ chỗ (idempotent)
-    if (jobUpdate.status === 'failed' && job.credits) {
-        await settleCredits({
-            uid: job.ownerId,
-            jobId: job.id,
-            period: job.credits.period,
-            reserved: job.credits.reserved,
-            actual: 0
-        });
-    }
-
-    if (!affectsDocument) return;
-
-    await docsCol()
-        .doc(job.documentId)
-        .update({ ...docUpdate, updatedAt: FieldValue.serverTimestamp() })
-        .catch((e) => {
-            if (!isNotFound(e)) throw e;
-        });
 }
 
 // Job: extract_document

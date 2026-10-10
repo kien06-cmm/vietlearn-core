@@ -15,7 +15,8 @@ import {
     resolveFocus,
     selectChunks
 } from '../ai/weaknessRules.js';
-import { settleCredits } from '../credits.js';
+import { QuotaError, attemptKey, reserveCredits, settleCredits } from '../credits.js';
+import { creditLimits, getPlan } from '../config/plans.js';
 import { UserError } from './extract.js';
 
 function log(level, message, extra = {}) {
@@ -68,6 +69,15 @@ export async function processGeneratePractice(job) {
         ...mistakes.map((m) => stemKey(m.stem))
     ];
 
+    // Giữ chỗ credits ngay khi bắt đầu chạy (job còn trong hàng đợi không khóa credit)
+    const owner = await db.collection('users').doc(uid).get();
+    try {
+        await reserveCredits({ uid, jobId: attemptKey(job), amount: job.count, limit: creditLimits(getPlan(owner.data()?.plan)) });
+    } catch (err) {
+        if (err instanceof QuotaError) throw new UserError(err.message, 'quota-credits');
+        throw err;
+    }
+
     // 5. Gọi AI một lần (đoạn nguồn chỉ vừa một lô), kiểm tra bằng luật
     const ask = Math.ceil(job.count * OVERSHOOT);
     const result = await generateJson({
@@ -79,7 +89,10 @@ export async function processGeneratePractice(job) {
     const list = Array.isArray(result.data?.questions) ? result.data.questions : [];
     const checked = validateQuestions(list, { chunkIndex, allowedTypes: job.types, seenKeys });
     const finalList = checked.accepted.slice(0, job.count);
-    if (!finalList.length) throw new Error('AI không tạo được câu luyện hợp lệ nào');
+    if (!finalList.length) {
+        // Không phải lỗi tạm thời: thử lại chỉ đốt thêm lượt gọi AI
+        throw new UserError('AI không tạo được câu luyện hợp lệ nào từ đoạn tài liệu này. Thử lại sau.', 'no-valid-questions');
+    }
 
     // 6. Lưu. id cố định theo job nên retry ghi đè đúng chỗ, không tạo câu trùng
     const batch = db.batch();
@@ -100,10 +113,8 @@ export async function processGeneratePractice(job) {
     });
     await batch.commit();
 
-    // 7. Chốt credits: tạo được bao nhiêu câu thì trừ bấy nhiêu, hoàn phần còn lại
-    if (job.credits) {
-        await settleCredits({ uid, jobId: job.id, period: job.credits.period, reserved: job.credits.reserved, actual: finalList.length });
-    }
+    // 7. Chốt credits: tạo được bao nhiêu câu thì trừ bấy nhiêu, hoàn phần còn lại (idempotent)
+    await settleCredits({ uid, jobId: attemptKey(job), actual: finalList.length });
 
     await jobRef.update({
         status: 'done',
