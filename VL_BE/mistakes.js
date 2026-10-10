@@ -4,8 +4,33 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from './firebase.js';
 import { classifyErrors } from './quiz/gradingRules.js';
 import { applyWrong, wrongPicks } from './quiz/learningRules.js';
+import { isPurgeable } from './quiz/completionRules.js';
 
 export const mistakesCol = (uid) => getDb().collection('users').doc(uid).collection('mistakes');
+
+// Dọn các câu hết hạn (expireAt đã qua) của MỘT người dùng. Thay cho TTL của Firestore (cần bật thanh toán).
+// Truy vấn khoảng trên một trường trong subcollection của người dùng nên chỉ cần chỉ mục đơn tự có; bản ghi expireAt = null không khớp.
+// Chỉ chạy tối đa một lần mỗi PURGE_EVERY_MS cho mỗi người (bộ nhớ tạm) để không tốn lượt đọc mỗi lần mở trang. Lỗi không được làm hỏng yêu cầu. Trả về số bản ghi đã xóa.
+const PURGE_EVERY_MS = 60 * 60 * 1000;
+const PURGE_BATCH = 400;
+const lastPurge = new Map();
+
+export async function purgeExpired(uid, nowMs = Date.now()) {
+    if (nowMs - (lastPurge.get(uid) ?? 0) < PURGE_EVERY_MS) return 0;
+    lastPurge.set(uid, nowMs);
+    try {
+        const snap = await mistakesCol(uid).where('expireAt', '<=', new Date(nowMs)).limit(PURGE_BATCH).get();
+        const refs = snap.docs.filter((d) => isPurgeable(d.data(), nowMs)).map((d) => d.ref);
+        if (!refs.length) return 0;
+        const batch = getDb().batch();
+        refs.forEach((ref) => batch.delete(ref));
+        await batch.commit();
+        return refs.length;
+    } catch (err) {
+        console.error(JSON.stringify({ time: new Date().toISOString(), level: 'error', message: `purgeExpired: ${err.message}` }));
+        return 0;
+    }
+}
 
 // Số bản ghi khớp truy vấn (đếm ở phía Firestore, không tốn một lượt đọc cho mỗi bản ghi)
 export async function countOf(query) {
@@ -65,7 +90,8 @@ export async function recordMistakes({ uid, quizId, quizVersion, questions, keys
             },
             nowMs
         );
-        batch.set(refs[i], { ...data, ...(prev ? {} : { createdAt: FieldValue.serverTimestamp() }), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        // expireAt: null = sai lại thì hủy hẹn tự xóa (câu đã nắm/hoàn thành trước đó có thể đang chờ hết hạn)
+        batch.set(refs[i], { ...data, ...(prev ? {} : { createdAt: FieldValue.serverTimestamp() }), expireAt: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     });
     await batch.commit();
     return wrong.length;
