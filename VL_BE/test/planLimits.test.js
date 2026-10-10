@@ -3,7 +3,7 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { PLANS, creditLimits, getPlan } from '../config/plans.js';
 import { finalizeImport, parseQuestionRows } from '../ai/importRules.js';
-import { _useDbForTests, currentPeriod, getBalance, reserveCredits, settleCredits } from '../credits.js';
+import { CYCLE_MS, _useDbForTests, getBalance, reserveCredits, settleCredits } from '../credits.js';
 
 // ---------- Cấu hình gói ----------
 test('Free: 10 credits/ngày, tạo tối đa 10 câu/job, nhập tối đa 20 câu', () => {
@@ -66,7 +66,7 @@ test('đúng 20 câu ở gói Free vẫn nhập được hết', () => {
     assert.equal(errors.length, 0);
 });
 
-// ---------- Credits làm mới theo ngày ----------
+// ---------- Credits làm mới theo chu kỳ 24 giờ (tính từ lần cấp đầu tiên, không phải 0 giờ) ----------
 function makeFakeDb() {
     const store = new Map();
     const snap = (key) => ({ exists: store.has(key), data: () => store.get(key) });
@@ -96,25 +96,32 @@ beforeEach(() => {
     _useDbForTests(db);
 });
 
-test('dùng hết credits hôm qua thì hôm nay có lại đủ 10, không cộng dồn', async () => {
-    const today = currentPeriod();
-    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 24 * 3_600_000).toISOString().slice(0, 10);
-    db.store.set(`creditBalances/${UID}_${yesterday}`, { uid: UID, period: yesterday, used: 10, reserved: 0 });
+test('hết chu kỳ 24 giờ trước thì chu kỳ mới có lại đủ 10, không cộng dồn', async () => {
+    const now = Date.now();
+    db.store.set(`creditBalances/${UID}`, { uid: UID, cycleStart: now - CYCLE_MS - 1000, used: 10, reserved: 0 });
 
-    const b = await getBalance(UID, LIMITS);
+    const b = await getBalance(UID, LIMITS, now);
     assert.equal(b.remaining, 10);
     assert.equal(b.used, 0);
 });
 
-test('credits chưa dùng hôm qua KHÔNG được cộng thêm vào hôm nay', async () => {
+test('chưa hết chu kỳ thì vẫn giữ số đã dùng', async () => {
+    const now = Date.now();
+    db.store.set(`creditBalances/${UID}`, { uid: UID, cycleStart: now - CYCLE_MS + 60_000, used: 10, reserved: 0 });
+
+    const b = await getBalance(UID, LIMITS, now);
+    assert.equal(b.remaining, 0);
+});
+
+test('credits chưa dùng ở chu kỳ trước KHÔNG được cộng thêm vào chu kỳ mới', async () => {
     const b = await getBalance(UID, LIMITS);
     assert.equal(b.remaining, PLANS.free.aiCreditsPerDay);
     assert.ok(b.remaining <= 10);
 });
 
-test('Free hết 10 credits thì bị chặn, nâng lên Pro giữa ngày thì dùng tiếp được phần còn lại của 40', async () => {
+test('Free hết 10 credits thì bị chặn, nâng lên Pro giữa chu kỳ thì dùng tiếp được phần còn lại của 40', async () => {
     await reserveCredits({ uid: UID, jobId: 'job1', amount: 10, limit: creditLimits(PLANS.free) });
-    await settleCredits({ uid: UID, jobId: 'job1', period: currentPeriod(), reserved: 10, actual: 10 });
+    await settleCredits({ uid: UID, jobId: 'job1', actual: 10 });
     assert.equal((await getBalance(UID, creditLimits(PLANS.free))).remaining, 0);
 
     const pro = await getBalance(UID, creditLimits(PLANS.pro));
@@ -123,11 +130,11 @@ test('Free hết 10 credits thì bị chặn, nâng lên Pro giữa ngày thì d
 
 test('tạo câu hỏi lỗi thì không trừ credit, thành công 7/10 câu thì chỉ trừ 7', async () => {
     await reserveCredits({ uid: UID, jobId: 'fail', amount: 10, limit: LIMITS });
-    await settleCredits({ uid: UID, jobId: 'fail', period: currentPeriod(), reserved: 10, actual: 0 });
+    await settleCredits({ uid: UID, jobId: 'fail', actual: 0 });
     assert.equal((await getBalance(UID, LIMITS)).remaining, 10);
 
     await reserveCredits({ uid: UID, jobId: 'ok', amount: 10, limit: LIMITS });
-    await settleCredits({ uid: UID, jobId: 'ok', period: currentPeriod(), reserved: 10, actual: 7 });
+    await settleCredits({ uid: UID, jobId: 'ok', actual: 7 });
     const b = await getBalance(UID, LIMITS);
     assert.equal(b.used, 7);
     assert.equal(b.remaining, 3);

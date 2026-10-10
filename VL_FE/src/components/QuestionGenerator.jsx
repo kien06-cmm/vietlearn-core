@@ -1,11 +1,19 @@
 // Chức năng: form tạo câu hỏi bằng AI từ một tài liệu - chọn tài liệu, chủ đề (Môn > Chương > Chủ đề), số câu, dạng câu, khoảng trang;
 // theo dõi tiến độ job; hiện AI credits còn lại. Khi job xong gọi onDone(jobId, result) để màn duyệt tải câu hỏi mới.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createTopic, generateQuestions, getJob } from '../services/api.js'
 import { TYPE_LABELS } from './QuestionCard.jsx'
-import { creditErrorText, formatResetAt, resetDate } from '../services/credits.js'
-import { useCredits } from '../hooks/useCredits.jsx'
-import CreditCard from './CreditMeter.jsx'
+import {
+  aiErrorText,
+  aiPauseUntil,
+  formatCountdown,
+  formatResetAt,
+  jobFailText,
+  jobWaitReason,
+  resetDate,
+} from '../services/credits.js'
+import { useAiPause, useCountdown, useCredits } from '../hooks/useCredits.jsx'
+import CreditCard, { AiPauseNotice } from './CreditMeter.jsx'
 import '../pages/Questions.css'
 
 const POLL_MS = 3000
@@ -34,6 +42,29 @@ function rejectedText(rejected) {
   return parts.length ? ` Đã loại ${parts.join(', ')}.` : ''
 }
 
+// Job đang xếp lại vì AI quá tải: nói rõ lý do, đếm ngược tới lúc hệ thống tự thử lại, và đang ở lần thử thứ mấy
+function RetryWait({ job }) {
+  const left = useCountdown(job.retryAt ? new Date(job.retryAt) : null)
+  const max = job.maxAttempts || 3
+  const next = Math.min((job.attempts || 1) + 1, max)
+  return (
+    <p className="hint job-wait">
+      {jobWaitReason(job.errorCode)}.{' '}
+      {left > 0 ? (
+        <>
+          Tự thử lại sau{' '}
+          <b className="count" aria-live="off">
+            {formatCountdown(left)}
+          </b>
+        </>
+      ) : (
+        'Đang thử lại'
+      )}{' '}
+      (lần {next}/{max}). Credits của bạn chưa bị trừ.
+    </p>
+  )
+}
+
 export default function QuestionGenerator({ getToken, docs, topics, onTopicCreated, onDone }) {
   const readyDocs = docs.filter((d) => d.status === 'ready')
   const [documentId, setDocumentId] = useState('')
@@ -44,6 +75,8 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
   const [pageFrom, setPageFrom] = useState('')
   const [pageTo, setPageTo] = useState('')
   const { credits, reload: loadCredits } = useCredits()
+  const { paused, left: pausedLeft, pauseAi } = useAiPause()
+  const seenRetry = useRef(null) // mốc thử lại đã xử lý, để chỉ tải lại trạng thái AI khi mốc đổi
   const [job, setJob] = useState(null) // { id, status, progress, error, result }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -64,6 +97,10 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
           onDone(fresh.id, fresh.result)
         } else if (fresh.status === 'failed') {
           loadCredits() // job lỗi => credits được hoàn
+        } else if (fresh.retryAt && fresh.retryAt !== seenRetry.current) {
+          // Job vừa bị xếp lại vì AI quá tải: hỏi backend xem AI còn nghỉ bao lâu để khóa nút tạo câu hỏi
+          seenRetry.current = fresh.retryAt
+          loadCredits()
         }
       } catch {
         // thử lại ở lần hỏi sau
@@ -104,7 +141,9 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
       setJob({ id: res.jobId, status: 'queued', progress: null, error: null, result: null })
       loadCredits()
     } catch (err) {
-      setError(creditErrorText(err))
+      const until = aiPauseUntil(err)
+      if (until) pauseAi(until)
+      else setError(aiErrorText(err))
       if (err.code === 'quota-credits') loadCredits() // hiện thẻ hết credits kèm đếm ngược
     } finally {
       setBusy(false)
@@ -120,6 +159,7 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
       <h2>Tạo câu hỏi bằng AI</h2>
 
       <CreditCard compact note="1 credit = 1 câu hỏi" />
+      <AiPauseNotice />
 
       {readyDocs.length === 0 ? (
         <p className="hint">Chưa có tài liệu nào ở trạng thái "Sẵn sàng". Hãy tải tài liệu lên ở mục Tài liệu trước.</p>
@@ -210,8 +250,8 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
             </p>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={busy || active || !formOk || outOfCredits || notEnough}>
-            {busy ? 'Đang gửi...' : active ? 'AI đang làm việc...' : 'Tạo câu hỏi'}
+          <button className="btn btn-primary" type="submit" disabled={busy || active || paused || !formOk || outOfCredits || notEnough}>
+            {busy ? 'Đang gửi...' : active ? 'AI đang làm việc...' : paused ? `AI nghỉ, thử lại sau ${formatCountdown(pausedLeft)}` : 'Tạo câu hỏi'}
           </button>
         </form>
       )}
@@ -220,7 +260,7 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
         <div className="upload-state" role="status">
           {active && (
             <>
-              <p className="hint">{jobText(job)}</p>
+              {job.status === 'queued' && jobWaitReason(job.errorCode) ? <RetryWait job={job} /> : <p className="hint">{jobText(job)}</p>}
               <div className="bar" aria-hidden="true">
                 <span style={{ width: job.progress?.total ? `${(job.progress.done / job.progress.total) * 100}%` : '8%' }} />
               </div>
@@ -234,7 +274,8 @@ export default function QuestionGenerator({ getToken, docs, topics, onTopicCreat
           )}
           {job.status === 'failed' && (
             <p className="msg msg-error" role="alert">
-              {job.error || 'Tạo câu hỏi thất bại.'} Credits đã được hoàn lại.
+              {jobFailText(job)}
+              {job.errorCode?.startsWith('ai-') && ' Credits đã được hoàn lại.'}
             </p>
           )}
         </div>

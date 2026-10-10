@@ -33,7 +33,14 @@ function init() {
     projectId = serviceAccount.project_id || null;
 }
 
+// Chỉ dùng trong test: thay Firestore thật bằng bản giả trong bộ nhớ
+let dbOverride = null;
+export function _setDbForTests(db) {
+    dbOverride = db;
+}
+
 export function getDb() {
+    if (dbOverride) return dbOverride;
     init();
     return getFirestore();
 }

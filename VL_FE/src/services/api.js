@@ -26,6 +26,10 @@ async function request(path, { token, method = 'GET', body } = {}) {
     err.code = data?.code
     err.resetsAt = data?.resetsAt // có khi hết credits (402): mốc credits được làm mới
     err.window = data?.window // 'day' | 'week': hạn mức nào đang chặn (hết ngày hay hết tuần)
+    err.reason = data?.reason // 429 của AI: 'overloaded' (quá tải) | 'quota-daily' (hết hạn mức hôm nay) | 'unavailable'
+    // Thời gian chờ gợi ý (giây) khi AI quá tải: ưu tiên thân phản hồi, dự phòng header Retry-After
+    const retrySec = Number(data?.retryAfter ?? res.headers.get('Retry-After'))
+    if (Number.isFinite(retrySec) && retrySec > 0) err.retryAfterMs = retrySec * 1000
     throw err
   }
   return res.json()
@@ -395,6 +399,22 @@ export function generatePractice(token, { topicId, count = 5 }) {
 //      weakest: [topic yếu nhất], counts: { new, weak, learning, strong } }
 export function getMastery(token) {
   return request('/review/mastery', { token })
+}
+
+// Chủ đề đã ôn xong (mọi câu đã nắm, không còn câu đang ôn)
+// -> { topics: [{ topicId ('_none' = câu không gắn chủ đề), name, chapter, subject, percent, level, questions, hard, wrongTotal, reviewTotal, hardest: [{ id, stem, wrongCount }] }] }
+export function getFinishedTopics(token) {
+  return request('/review/finished', { token })
+}
+
+// Hoàn thành chủ đề: lưu trữ các câu, không hiện nữa, tự xóa sau 90 ngày -> { archived }. Lỗi: 409 'not-finished', 404 'nothing-to-archive'.
+export function completeFinishedTopic(token, topicId) {
+  return request('/review/finished/complete', { token, method: 'POST', body: { topicId } })
+}
+
+// Ôn lại chủ đề: đưa câu về mốc đầu, đến hạn ngay. scope 'hard' (mặc định, chỉ câu khó) | 'all' -> { restarted }. Lỗi: 409 'no-hard', 404 'nothing-to-restart'.
+export function restartFinishedTopic(token, topicId, scope = 'hard') {
+  return request('/review/finished/restart', { token, method: 'POST', body: { topicId, scope } })
 }
 
 // ---------- Heatmap + chuyển kết quả khách (Phase 5) ----------

@@ -20,12 +20,23 @@ import {
     toReviewQuestion,
     wrongPicks
 } from '../quiz/learningRules.js';
-import { countOf, loadTopicNames, mistakesCol } from '../mistakes.js';
+import { countOf, loadTopicNames, mistakesCol, purgeExpired } from '../mistakes.js';
 import { recordTopicOutcomes, statsCol } from '../mastery.js';
 import { buildKnowledgeMap, outcomesByTopic, toMasteryItem } from '../quiz/masteryRules.js';
+import {
+    MASTERED_TTL_DAYS,
+    MAX_FINISHED_TOPICS,
+    NO_TOPIC,
+    archivePatch,
+    expireIn,
+    groupByTopic,
+    restartPatch,
+    restartTargets,
+    summarizeFinished
+} from '../quiz/completionRules.js';
 import { pickPractice, toPracticeQuestion } from '../quiz/practiceRules.js';
 import { creditLimits, getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, reserveCredits } from '../credits.js';
+import { QuotaError, assertCredits } from '../credits.js';
 import { MAX_PRACTICE_COUNT } from '../ai/weaknessRules.js';
 import { wakeWorker } from '../worker/index.js';
 
@@ -58,6 +69,8 @@ router.get(
     async (req, res) => {
         const col = mistakesCol(req.actor.id);
         const now = new Date();
+        // Dọn câu hết hạn trước khi đếm để số liệu khớp (tối đa một lần mỗi giờ cho mỗi người, lỗi bị bỏ qua)
+        await purgeExpired(req.actor.id, now.getTime());
         // nextReviewAt = null (câu đã nắm) không khớp truy vấn khoảng nên không bị đếm là đến hạn
         const [open, due, mastered, next] = await Promise.all([
             countOf(col.where('status', '==', 'open')),
@@ -254,7 +267,13 @@ router.post(
                 { status, confidence: confidence[q.id] ?? null, picks: status === 'wrong' ? wrongPicks(doc.type, answers[q.id], doc.correct) : [] },
                 nowMs
             );
-            batch.update(col.doc(q.id), { ...patch, updatedAt: FieldValue.serverTimestamp() });
+            // Câu đã hoàn thành (archived) mà trả lời đúng thì giữ nguyên lưu trữ; sai thì mở lại và hủy hẹn xóa.
+            // Câu vừa nắm thì hẹn tự xóa sau MASTERED_TTL_DAYS (Firestore TTL trên expireAt) để sổ không phình mãi.
+            const keepArchived = doc.status === 'archived' && patch.status === 'mastered';
+            const expiry = keepArchived
+                ? { status: 'archived' }
+                : { expireAt: patch.status === 'mastered' ? expireIn(MASTERED_TTL_DAYS, nowMs) : null };
+            batch.update(col.doc(q.id), { ...patch, ...expiry, updatedAt: FieldValue.serverTimestamp() });
             items.push({
                 id: q.id,
                 status,
@@ -395,42 +414,143 @@ router.post(
             return fail(res, 429, 'Đang có job tạo câu luyện chạy, vui lòng chờ xong', 'too-many-jobs');
         }
 
-        const jobRef = db.collection('jobs').doc();
-        const period = currentPeriod();
+        // Chỉ kiểm tra đủ credits lúc nhận yêu cầu; credits được giữ chỗ khi job bắt đầu chạy
         try {
-            await reserveCredits({
-                uid,
-                jobId: jobRef.id,
-                amount: count,
-                limit: creditLimits(plan),
-                writes: (tx) =>
-                    tx.set(jobRef, {
-                        type: 'generate_practice',
-                        ownerId: uid,
-                        topicId,
-                        count,
-                        types: ['single'], // V1: chỉ trắc nghiệm 4 lựa chọn (dễ kiểm tra, chấm tự động)
-                        credits: { period, reserved: count },
-                        status: 'queued',
-                        attempts: 0,
-                        maxAttempts: 3,
-                        progress: { done: 0, total: 1 },
-                        error: null,
-                        deadLetter: false,
-                        runAfter: FieldValue.serverTimestamp(),
-                        createdAt: FieldValue.serverTimestamp(),
-                        updatedAt: FieldValue.serverTimestamp()
-                    })
-            });
+            await assertCredits({ uid, amount: count, limit: creditLimits(plan) });
         } catch (err) {
             if (err instanceof QuotaError) {
-                return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
+                return fail(res, 402, err.message, 'quota-credits');
             }
             throw err;
         }
 
+        const jobRef = db.collection('jobs').doc();
+        await jobRef.set({
+            type: 'generate_practice',
+            ownerId: uid,
+            topicId,
+            count,
+            types: ['single'], // V1: chỉ trắc nghiệm 4 lựa chọn (dễ kiểm tra, chấm tự động)
+            status: 'queued',
+            attempts: 0,
+            maxAttempts: 3,
+            progress: { done: 0, total: 1 },
+            error: null,
+            deadLetter: false,
+            runAfter: FieldValue.serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+
         wakeWorker();
-        res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { period, reserved: count } });
+        res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { requested: count, reserved: 0 } });
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Chủ đề đã ôn xong: mọi câu sai của chủ đề đều đã nắm (không còn câu đang ôn). Người học xem tổng quan rồi chọn:
+//  - Hoàn thành (POST /review/finished/complete): lưu trữ các câu, không hiện nữa, tự xóa sau ARCHIVE_TTL_DAYS ngày.
+//  - Ôn lại (POST /review/finished/restart): đưa câu về mốc đầu, đến hạn ngay. scope 'hard' (mặc định) chỉ câu khó, 'all' tất cả.
+// topicId '_none' = nhóm câu không gắn chủ đề. Xóa thật do Firestore TTL (chính sách trên collection group "mistakes", trường expireAt).
+// ---------------------------------------------------------------------------
+const topicQuery = (col, key) => col.where('topicId', '==', key === NO_TOPIC ? null : key);
+const finishedSchema = z.object({ topicId: z.string().regex(idPattern), scope: z.enum(['hard', 'all']).optional() }).strict();
+const BATCH_DOCS = 400; // dưới giới hạn 500 thao tác của một batch
+
+router.get(
+    '/finished',
+    userOnly,
+    actorLimit('review-finished', 30),
+    async (req, res) => {
+        const uid = req.actor.id;
+        const col = mistakesCol(uid);
+        const snap = await col.where('status', '==', 'mastered').limit(MAX_MISTAKES_LIST).get();
+        const groups = groupByTopic(snap.docs.map((d) => d.data()));
+
+        // Chủ đề còn câu đang ôn thì chưa xong. Đếm trực tiếp để không sót khi sổ có hơn MAX_MISTAKES_LIST câu.
+        const candidates = [...groups.keys()].slice(0, MAX_FINISHED_TOPICS);
+        const openCounts = await Promise.all(candidates.map((k) => countOf(topicQuery(col, k).where('status', '==', 'open'))));
+        const ready = candidates.filter((_, i) => openCounts[i] === 0);
+
+        const realIds = ready.filter((k) => k !== NO_TOPIC);
+        const [names, statSnaps] = await Promise.all([
+            loadTopicNames(realIds),
+            realIds.length ? getDb().getAll(...realIds.map((id) => statsCol(uid).doc(id))) : []
+        ]);
+        const stats = new Map(statSnaps.filter((s) => s.exists).map((s) => [s.id, { topicId: s.id, ...s.data() }]));
+
+        res.status(200).json({
+            status: 'success',
+            serverNow: new Date().toISOString(),
+            topics: ready.map((key) => {
+                const mastery = stats.has(key) ? toMasteryItem(stats.get(key), names[key]) : null;
+                return {
+                    topicId: key,
+                    name: names[key]?.name ?? null,
+                    chapter: names[key]?.chapter ?? null,
+                    subject: names[key]?.subject ?? null,
+                    percent: mastery?.percent ?? null,
+                    level: mastery?.level ?? null,
+                    ...summarizeFinished(groups.get(key))
+                };
+            })
+        });
+    }
+);
+
+router.post(
+    '/finished/complete',
+    userOnly,
+    actorLimit('review-finished-complete', 20),
+    async (req, res) => {
+        const parsed = finishedSchema.safeParse(req.body);
+        if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+        const key = parsed.data.topicId;
+        const col = mistakesCol(req.actor.id);
+
+        if ((await countOf(topicQuery(col, key).where('status', '==', 'open'))) > 0) {
+            return fail(res, 409, 'Chủ đề này vẫn còn câu đang ôn', 'not-finished');
+        }
+
+        const nowMs = Date.now();
+        const patch = archivePatch(nowMs);
+        let archived = 0;
+        for (let round = 0; round < 5; round++) {
+            const snap = await topicQuery(col, key).where('status', '==', 'mastered').limit(BATCH_DOCS).get();
+            if (snap.empty) break;
+            const batch = getDb().batch();
+            snap.docs.forEach((d) => batch.update(d.ref, { ...patch, updatedAt: FieldValue.serverTimestamp() }));
+            await batch.commit();
+            archived += snap.size;
+        }
+        if (!archived) return fail(res, 404, 'Chủ đề này chưa có câu đã nắm', 'nothing-to-archive');
+        res.status(200).json({ status: 'success', archived });
+    }
+);
+
+router.post(
+    '/finished/restart',
+    userOnly,
+    actorLimit('review-finished-restart', 20),
+    async (req, res) => {
+        const parsed = finishedSchema.safeParse(req.body);
+        if (!parsed.success) return fail(res, 400, 'Dữ liệu không hợp lệ');
+        const { topicId: key, scope = 'hard' } = parsed.data;
+        const col = mistakesCol(req.actor.id);
+
+        const snap = await topicQuery(col, key).where('status', '==', 'mastered').limit(BATCH_DOCS).get();
+        const targets = restartTargets(snap.docs.map((d) => d.data()), scope);
+        if (!targets.length) {
+            return scope === 'hard'
+                ? fail(res, 409, 'Chủ đề này không có câu khó. Bạn có thể chọn ôn lại tất cả các câu.', 'no-hard')
+                : fail(res, 404, 'Chủ đề này chưa có câu để ôn lại', 'nothing-to-restart');
+        }
+
+        const patch = restartPatch(Date.now());
+        const batch = getDb().batch();
+        targets.forEach((d) => batch.update(col.doc(d.questionId), { ...patch, updatedAt: FieldValue.serverTimestamp() }));
+        await batch.commit();
+        res.status(200).json({ status: 'success', restarted: targets.length });
     }
 );
 

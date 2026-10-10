@@ -1,10 +1,13 @@
-// Chức năng: job "generate_questions" - đọc chunk của tài liệu, gọi AI theo lô, kiểm tra bằng luật, lưu câu hỏi (nháp) + đáp án, chốt AI credits.
-// Lỗi được ném lên processJob (jobRunner.js) để retry/dead-letter và hoàn credits.
+// Chức năng: job "generate_questions" - đọc chunk của tài liệu, gọi AI theo lô, kiểm tra bằng luật, lưu câu hỏi (nháp) + đáp án.
+// Credits: giữ chỗ khi job BẮT ĐẦU chạy (theo khóa của lần thử này); thành công thì chốt đúng số câu lưu được;
+// thất bại thì jobRunner.settleFailure giải phóng phần giữ chỗ. Job đang nằm trong hàng đợi không khóa credit.
+// Lỗi tạm thời ném lên processJob để retry; lỗi do người dùng (UserError) thất bại ngay.
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase.js';
 import { generateJson } from '../ai/provider.js';
 import { SYSTEM_PROMPT, buildPrompt, planBatches, splitForStorage, stemKey, validateQuestions } from '../ai/questionRules.js';
-import { settleCredits } from '../credits.js';
+import { creditLimits, getPlan } from '../config/plans.js';
+import { QuotaError, attemptKey, reserveCredits, settleCredits } from '../credits.js';
 import { UserError } from './extract.js';
 
 function log(level, message, extra = {}) {
@@ -32,6 +35,16 @@ export async function processGenerateQuestions(job) {
 
     const chunks = await loadChunks(docSnap.ref, job);
     if (!chunks.length) throw new UserError('Không có nội dung chữ để tạo câu hỏi');
+
+    // Giữ chỗ credits ngay khi bắt đầu chạy. Hết credits thì thất bại ngay, không thử lại.
+    const owner = await db.collection('users').doc(job.ownerId).get();
+    const plan = getPlan(owner.data()?.plan);
+    try {
+        await reserveCredits({ uid: job.ownerId, jobId: attemptKey(job), amount: job.count, limit: creditLimits(plan) });
+    } catch (err) {
+        if (err instanceof QuotaError) throw new UserError(err.message, 'quota-credits');
+        throw err;
+    }
 
     // Đề đã có của tài liệu này (trừ câu do chính job này tạo ở lần chạy trước) để không sinh trùng
     const existing = await db.collection('questions').where('source.documentId', '==', job.documentId).limit(300).get();
@@ -61,12 +74,21 @@ export async function processGenerateQuestions(job) {
         accepted.push(...checked.accepted);
         for (const [reason, n] of Object.entries(checked.rejected)) rejected[reason] = (rejected[reason] || 0) + n;
 
-        // Ghi tiến độ theo lô (đồng thời làm mới updatedAt để recoverStaleJobs không tưởng worker đã chết)
-        await jobRef.update({ progress: { done: i + 1, total: batches.length }, updatedAt: FieldValue.serverTimestamp() });
+        // Ghi tiến độ theo lô, đồng thời cộng dồn số lần gọi và token trên job (làm mới updatedAt để recoverStaleJobs không tưởng worker đã chết)
+        await jobRef.update({
+            progress: { done: i + 1, total: batches.length },
+            'aiUsage.calls': FieldValue.increment(1),
+            'aiUsage.inputTokens': FieldValue.increment(result.usage.inputTokens),
+            'aiUsage.outputTokens': FieldValue.increment(result.usage.outputTokens),
+            updatedAt: FieldValue.serverTimestamp()
+        });
     }
 
     const finalList = accepted.slice(0, job.count);
-    if (!finalList.length) throw new Error('AI không tạo được câu hỏi hợp lệ nào');
+    if (!finalList.length) {
+        // Không phải lỗi tạm thời: thử lại chỉ đốt thêm lượt gọi AI, nên báo người dùng ngay
+        throw new UserError('AI không tạo được câu hỏi hợp lệ nào từ nội dung này. Hãy thử chọn phạm vi trang khác hoặc giảm số câu.', 'no-valid-questions');
+    }
 
     // id cố định theo job => retry ghi đè đúng chỗ, không tạo câu trùng
     const batch = db.batch();
@@ -86,16 +108,8 @@ export async function processGenerateQuestions(job) {
     });
     await batch.commit();
 
-    // Chốt credits: dùng bao nhiêu câu thì trừ bấy nhiêu, hoàn phần còn lại
-    if (job.credits) {
-        await settleCredits({
-            uid: job.ownerId,
-            jobId: job.id,
-            period: job.credits.period,
-            reserved: job.credits.reserved,
-            actual: finalList.length
-        });
-    }
+    // Chốt credits: dùng bao nhiêu câu thì trừ bấy nhiêu, hoàn phần còn lại (idempotent)
+    await settleCredits({ uid: job.ownerId, jobId: attemptKey(job), actual: finalList.length });
 
     await jobRef.update({
         status: 'done',

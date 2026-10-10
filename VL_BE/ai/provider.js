@@ -1,15 +1,14 @@
 // Chức năng: lớp trừu tượng nhà cung cấp AI. Business logic chỉ gọi generateJson(); đổi nhà cung cấp/model bằng biến môi trường.
+// Mọi lời gọi AI (worker tạo câu hỏi, API hỏi đáp/tóm tắt) đều đi qua aiLimiter nên số lời gọi đồng thời bị giới hạn chung.
+import { aiLimiter, BusyError } from './concurrency.js';
+import { aiCooldown, cooldownError, cooldownMsFor } from './cooldown.js';
+import { AIError } from './errors.js';
+import { httpErrorFor } from './quotaError.js';
+
+// AIError nằm ở errors.js; export lại ở đây để các file cũ vẫn import từ provider.js được
+export { AIError };
 
 const TIMEOUT_MS = 60_000;
-
-// Lỗi gọi AI. retryable=true: lỗi tạm thời (429, 5xx, mạng) nên thử lại
-export class AIError extends Error {
-    constructor(message, { retryable = false, code = 'ai-error' } = {}) {
-        super(message);
-        this.retryable = retryable;
-        this.code = code;
-    }
-}
 
 // Gỡ rào ```json nếu model lỡ thêm vào
 function parseJson(text) {
@@ -49,9 +48,9 @@ async function gemini({ system, prompt, temperature, maxOutputTokens }) {
     }
 
     if (!res.ok) {
-        const detail = (await res.text().catch(() => '')).slice(0, 300);
-        const retryable = res.status === 429 || res.status >= 500;
-        throw new AIError(`AI lỗi ${res.status}: ${detail}`, { retryable, code: res.status === 429 ? 'ai-rate-limit' : 'ai-http' });
+        // 429 theo phút / theo ngày, Retry-After... được phân loại trong quotaError.js
+        const raw = await res.text().catch(() => '');
+        throw httpErrorFor(res.status, res.headers.get('retry-after'), raw);
     }
 
     const json = await res.json();
@@ -78,6 +77,11 @@ async function gemini({ system, prompt, temperature, maxOutputTokens }) {
 
 const PROVIDERS = { gemini };
 
+// Chỉ dùng trong test: gắn nhà cung cấp giả (fn nhận cùng tham số như gemini)
+export function _setProviderForTests(name, fn) {
+    PROVIDERS[name] = fn;
+}
+
 // Ghi log mỗi lần gọi AI (số request, token, lỗi) để theo dõi chi phí và quota. Không ghi nội dung prompt hay key.
 function log(level, message, extra = {}) {
     console.log(JSON.stringify({ time: new Date().toISOString(), level, scope: 'ai', message, ...extra }));
@@ -89,6 +93,28 @@ export async function generateJson({ system = '', prompt, temperature = 0.4, max
     const provider = PROVIDERS[name];
     if (!provider) throw new AIError(`Nhà cung cấp AI không hỗ trợ: ${name}`, { code: 'ai-provider' });
 
+    // Gemini vừa báo 429 / hết quota: không gửi thêm request cho tới hết thời gian tạm nghỉ
+    const waitBefore = aiCooldown.remainingMs();
+    if (waitBefore > 0) throw cooldownError(waitBefore);
+
+    let release;
+    try {
+        release = await aiLimiter.acquire();
+    } catch (err) {
+        if (err instanceof BusyError) {
+            log('warn', 'Từ chối lượt gọi AI do quá tải', { provider: name, ...aiLimiter.stats() });
+            throw new AIError(err.message, { retryable: true, code: 'ai-busy' });
+        }
+        throw err;
+    }
+
+    // Có thể đã chờ trong hàng đợi lâu: kiểm tra lại, vì lời gọi khác có thể vừa bị 429 trong lúc chờ
+    const waitAfter = aiCooldown.remainingMs();
+    if (waitAfter > 0) {
+        release();
+        throw cooldownError(waitAfter);
+    }
+
     const started = Date.now();
     try {
         const result = await provider({ system, prompt, temperature, maxOutputTokens });
@@ -96,6 +122,13 @@ export async function generateJson({ system = '', prompt, temperature = 0.4, max
         return result;
     } catch (err) {
         log('warn', 'Gọi AI lỗi', { provider: name, ms: Date.now() - started, code: err.code || 'unknown', retryable: !!err.retryable });
+        const pauseMs = cooldownMsFor(err);
+        if (pauseMs !== null) {
+            const until = aiCooldown.start(pauseMs);
+            log('warn', 'Tạm dừng gọi AI do hết hạn mức', { provider: name, code: err.code, pauseMs, until: new Date(until).toISOString() });
+        }
         throw err;
+    } finally {
+        release();
     }
 }

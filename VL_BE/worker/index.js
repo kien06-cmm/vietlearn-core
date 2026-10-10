@@ -1,5 +1,7 @@
 // Chức năng: vòng lặp worker - lấy job từ hàng đợi Firestore, xử lý lần lượt; được "đánh thức" ngay khi có job mới.
 import { claimNextJob, cleanupStaleUploads, processJob, recoverStaleJobs } from './jobRunner.js';
+import { aiCooldown } from '../ai/cooldown.js';
+import { AI_JOB_TYPES } from './queueRules.js';
 
 const IDLE_POLL_MS = 30_000; // khi rảnh, kiểm tra hàng đợi mỗi 30 giây (tiết kiệm lượt đọc Firestore)
 const RECOVER_EVERY_MS = 5 * 60_000;
@@ -49,7 +51,9 @@ export function startWorker() {
                     await recoverStaleJobs();
                     await cleanupStaleUploads();
                 }
-                const job = await claimNextJob();
+                // Gemini đang tạm nghỉ vì 429/hết quota: không nhận job dùng AI (job trích văn bản vẫn chạy bình thường)
+                const excludeTypes = aiCooldown.remainingMs() > 0 ? AI_JOB_TYPES : [];
+                const job = await claimNextJob({ excludeTypes });
                 if (job) {
                     await processJob(job);
                     continue; // còn job thì làm tiếp ngay
@@ -62,7 +66,9 @@ export function startWorker() {
                 pendingWake = false;
                 continue;
             }
-            await sleepUntilWake(IDLE_POLL_MS);
+            // Đang tạm nghỉ AI: dậy đúng lúc hết nghỉ thay vì chờ hết chu kỳ poll
+            const pause = aiCooldown.remainingMs();
+            await sleepUntilWake(pause > 0 ? Math.min(pause + 500, IDLE_POLL_MS) : IDLE_POLL_MS);
             pendingWake = false;
         }
     })();

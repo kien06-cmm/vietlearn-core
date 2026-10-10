@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { askDocument, createSummary, getDocumentPage, getSummary } from '../services/api.js'
 import Icon from './Icon.jsx'
 import MathText from './MathText.jsx'
-import { creditErrorText } from '../services/credits.js'
-import { useCredits } from '../hooks/useCredits.jsx'
+import { aiErrorText, aiPauseUntil, formatCountdownShort } from '../services/credits.js'
+import { useAiPause, useCredits } from '../hooks/useCredits.jsx'
+import { AiPauseNotice } from './CreditMeter.jsx'
 import '../pages/Questions.css'
 
 function clampPage(n, total) {
@@ -27,6 +28,7 @@ function SummaryPanel({ doc, getToken, onGo }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const { reload: reloadCredits } = useCredits()
+  const { paused, left, pauseAi } = useAiPause()
 
   useEffect(() => {
     let cancelled = false
@@ -47,12 +49,16 @@ function SummaryPanel({ doc, getToken, onGo }) {
       setSummary(res.summary)
       reloadCredits()
     } catch (err) {
-      setError(creditErrorText(err))
+      const until = aiPauseUntil(err)
+      if (until) pauseAi(until) // AI quá tải: thông báo tạm nghỉ + đếm ngược hiện ở đầu màn hình, không cần thêm dòng lỗi
+      else setError(aiErrorText(err))
       if (err.code === 'quota-credits') reloadCredits()
     } finally {
       setBusy(false)
     }
   }
+
+  const waitLabel = `Thử lại sau ${formatCountdownShort(left)}`
 
   return (
     <section className="card">
@@ -62,8 +68,8 @@ function SummaryPanel({ doc, getToken, onGo }) {
       {summary === null && (
         <>
           <p className="hint">Chưa có bản tóm tắt. Tạo tóm tắt sẽ tốn AI credits.</p>
-          <button className="btn btn-primary" disabled={busy} onClick={() => create(false)}>
-            {busy ? 'AI đang tóm tắt...' : 'Tóm tắt tài liệu'}
+          <button className="btn btn-primary" disabled={busy || paused} onClick={() => create(false)}>
+            {busy ? 'AI đang tóm tắt...' : paused ? waitLabel : 'Tóm tắt tài liệu'}
           </button>
         </>
       )}
@@ -83,8 +89,8 @@ function SummaryPanel({ doc, getToken, onGo }) {
               </li>
             ))}
           </ul>
-          <button className="btn btn-secondary" disabled={busy} onClick={() => create(true)}>
-            {busy ? 'AI đang tóm tắt...' : 'Tóm tắt lại (tốn credits)'}
+          <button className="btn btn-secondary" disabled={busy || paused} onClick={() => create(true)}>
+            {busy ? 'AI đang tóm tắt...' : paused ? waitLabel : 'Tóm tắt lại (tốn credits)'}
           </button>
         </>
       )}
@@ -104,11 +110,12 @@ function AskPanel({ doc, getToken, onGo }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const { reload: reloadCredits } = useCredits()
+  const { paused, left, pauseAi } = useAiPause()
 
   async function submit(e) {
     e.preventDefault()
     const q = question.trim()
-    if (!q) return
+    if (!q || paused) return
     setBusy(true)
     setError('')
     setResult(null)
@@ -116,7 +123,9 @@ function AskPanel({ doc, getToken, onGo }) {
       setResult(await askDocument(await getToken(), doc.id, q))
       reloadCredits()
     } catch (err) {
-      setError(creditErrorText(err))
+      const until = aiPauseUntil(err)
+      if (until) pauseAi(until)
+      else setError(aiErrorText(err))
       if (err.code === 'quota-credits') reloadCredits()
     } finally {
       setBusy(false)
@@ -135,8 +144,8 @@ function AskPanel({ doc, getToken, onGo }) {
           placeholder="Ví dụ: Định nghĩa hàm số bậc hai là gì?"
           aria-label="Câu hỏi về tài liệu"
         />
-        <button className="btn btn-primary" type="submit" disabled={busy || !question.trim()}>
-          {busy ? 'AI đang tìm trong tài liệu...' : 'Hỏi'}
+        <button className="btn btn-primary" type="submit" disabled={busy || paused || !question.trim()}>
+          {busy ? 'AI đang tìm trong tài liệu...' : paused ? `Thử lại sau ${formatCountdownShort(left)}` : 'Hỏi'}
         </button>
       </form>
 
@@ -257,6 +266,7 @@ export default function DocumentViewer({ doc, getToken, onClose, initialPage = 1
 
       {ready && (
         <>
+          <AiPauseNotice />
           <SummaryPanel doc={doc} getToken={getToken} onGo={goTo} />
           <AskPanel doc={doc} getToken={getToken} onGo={goTo} />
         </>

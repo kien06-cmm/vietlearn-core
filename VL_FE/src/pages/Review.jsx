@@ -1,7 +1,19 @@
 // Chức năng: trang Ôn tập (Phase 5) - hôm nay cần ôn bao nhiêu câu, làm bài ôn từng câu (có phản hồi ngay, cập nhật lịch 1 -> 3 -> 7 ngày), và Sổ lỗi sai (đáp án đúng, gợi ý kiểu sai, đáp án hay chọn nhầm).
 // Câu sai ở bài làm bình thường tự vào sổ khi nộp bài (chỉ tài khoản). Đáp án đúng chỉ hiện sau khi bạn đã trả lời câu đó.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { generatePractice, getJob, getPracticeQuestions, getReviewQuestions, getReviewSubjects, getReviewSummary, gradeReview, listMistakes } from '../services/api.js'
+import {
+  completeFinishedTopic,
+  generatePractice,
+  getFinishedTopics,
+  getJob,
+  getPracticeQuestions,
+  getReviewQuestions,
+  getReviewSubjects,
+  getReviewSummary,
+  gradeReview,
+  listMistakes,
+  restartFinishedTopic,
+} from '../services/api.js'
 import { CONFIDENCE_LEVELS, ERROR_LABELS, ERROR_TYPES, LETTERS, isAnswered, tfText } from '../services/attemptText.js'
 import { QuestionInput } from '../components/AttemptRunner.jsx'
 import { ReviewBody } from '../components/AttemptResult.jsx'
@@ -488,6 +500,130 @@ function Notebook({ getToken, onBack }) {
 }
 
 // ---------------------------------------------------------------------------
+// Chủ đề đã ôn xong: tổng quan + chọn Hoàn thành (lưu trữ, tự xóa sau 90 ngày) hoặc Ôn lại (câu khó / tất cả)
+// Lỗi tải danh sách không chặn trang Ôn tập: chỉ ẩn thẻ này.
+// ---------------------------------------------------------------------------
+function FinishedCard({ getToken, topic, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false) // đang hỏi lại trước khi Hoàn thành
+  const [error, setError] = useState('')
+
+  async function run(action) {
+    setBusy(true)
+    setError('')
+    try {
+      await action(await getToken())
+      await onChanged()
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  const label = topic.name || (topic.topicId === '_none' ? 'Câu chưa gắn chủ đề' : 'Chủ đề chưa đặt tên')
+
+  return (
+    <article className="card finished-card">
+      <div className="q-top">
+        <span className="badge">Đã ôn xong</span>
+        {topic.subject && <span className="badge">{topic.subject}</span>}
+      </div>
+      <h3 className="finished-title">{label}</h3>
+      <div className="quiz-meta">
+        <span className="chip">{topic.questions} câu</span>
+        <span className="chip">Câu khó {topic.hard}</span>
+        <span className="chip">Tổng lần sai {topic.wrongTotal}</span>
+        {topic.percent != null && <span className="chip">Thành thạo {topic.percent}%</span>}
+      </div>
+
+      {topic.hardest.length > 0 && (
+        <>
+          <p className="hint">Những câu khó nhất:</p>
+          <ul className="conf-rows">
+            {topic.hardest.map((h) => (
+              <li key={h.id} className="conf-row">
+                <span className="finished-stem">
+                  <MathText text={h.stem} />
+                </span>
+                <strong>Sai {h.wrongCount} lần</strong>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {error && (
+        <p className="msg msg-error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {confirming ? (
+        <>
+          <p className="hint">
+            Hoàn thành sẽ lưu trữ {topic.questions} câu của chủ đề này, không còn hiện trong sổ lỗi sai và tự xóa sau 90 ngày. Nếu bạn làm sai lại một câu thì câu đó tự mở lại.
+          </p>
+          <div className="doc-actions">
+            <button className="btn btn-primary" disabled={busy} onClick={() => run((t) => completeFinishedTopic(t, topic.topicId))}>
+              {busy ? 'Đang lưu...' : 'Xác nhận hoàn thành'}
+            </button>
+            <button className="btn btn-secondary" disabled={busy} onClick={() => setConfirming(false)}>
+              Hủy
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="doc-actions">
+          <button className="btn btn-primary" disabled={busy} onClick={() => setConfirming(true)}>
+            Hoàn thành
+          </button>
+          {topic.hard > 0 && (
+            <button className="btn btn-secondary" disabled={busy} onClick={() => run((t) => restartFinishedTopic(t, topic.topicId, 'hard'))}>
+              Ôn lại {topic.hard} câu khó
+            </button>
+          )}
+          <button className="btn btn-secondary" disabled={busy} onClick={() => run((t) => restartFinishedTopic(t, topic.topicId, 'all'))}>
+            Ôn lại tất cả
+          </button>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function FinishedTopics({ getToken, reloadKey, onChanged }) {
+  const [topics, setTopics] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await getFinishedTopics(await getToken())
+        if (!cancelled) setTopics(res.topics)
+      } catch {
+        if (!cancelled) setTopics([]) // thẻ phụ: lỗi thì ẩn, không làm hỏng trang
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, reloadKey])
+
+  if (topics.length === 0) return null
+  return (
+    <>
+      <section>
+        <h2>Chủ đề đã ôn xong</h2>
+        <p className="hint">Bạn đã nắm mọi câu sai của các chủ đề này. Hoàn thành để dọn khỏi sổ, hoặc ôn lại nếu muốn chắc hơn.</p>
+      </section>
+      {topics.map((t) => (
+        <FinishedCard key={t.topicId} getToken={getToken} topic={t} onChanged={onChanged} />
+      ))}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Trang chính
 // ---------------------------------------------------------------------------
 export default function Review({ getToken }) {
@@ -498,6 +634,7 @@ export default function Review({ getToken }) {
   const [subjects, setSubjects] = useState([]) // các môn có câu đang ôn: [{ subject, open, due }]
   const [subject, setSubject] = useState('') // môn đang chọn ('' = tất cả)
   const [error, setError] = useState('')
+  const [finishedKey, setFinishedKey] = useState(0) // đổi giá trị này thì tải lại danh sách chủ đề đã ôn xong
 
   const loadSummary = useCallback(async () => {
     try {
@@ -520,6 +657,13 @@ export default function Review({ getToken }) {
     setView(practice ? 'map' : 'home')
     setPractice(null)
     loadSummary()
+    setFinishedKey((k) => k + 1)
+  }
+
+  // Vừa Hoàn thành hoặc Ôn lại một chủ đề: số câu cần ôn có thể đổi nên tải lại cả hai
+  async function afterFinishedChange() {
+    setFinishedKey((k) => k + 1)
+    await loadSummary()
   }
 
   if (view === 'session') return <ReviewSession getToken={getToken} scope={scope} subject={subject} topic={practice} onDone={back} />
@@ -620,6 +764,8 @@ export default function Review({ getToken }) {
           </div>
         </section>
       )}
+
+      <FinishedTopics getToken={getToken} reloadKey={finishedKey} onChanged={afterFinishedChange} />
 
       <button className="btn btn-secondary" onClick={() => setView('notebook')}>
         Mở sổ lỗi sai

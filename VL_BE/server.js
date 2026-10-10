@@ -34,7 +34,8 @@ const origins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
     : true;
 
-app.use(cors({ origin: origins }));
+// exposedHeaders: trình duyệt chỉ cho giao diện đọc Retry-After (thời gian chờ khi AI quá tải) nếu backend cho phép tại đây
+app.use(cors({ origin: origins, exposedHeaders: ['Retry-After'] }));
 // Riêng route nhập đề có sẵn nhận file dạng base64 (tối đa 2 MB) nên cho phép body lớn hơn. Phải đặt TRƯỚC giới hạn 10kb chung bên dưới.
 app.use('/questions/import', express.json({ limit: '3mb' }));
 // Lưu nháp/nộp bài có thể gửi tới 100 câu trả lời nên cần giới hạn lớn hơn 10kb

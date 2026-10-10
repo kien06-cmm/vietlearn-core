@@ -1,8 +1,10 @@
-// Chức năng: AI Credits (Phase 3) - giữ chỗ (reserved) trước khi gọi AI, chốt (actual) khi xong, hoàn (refund) phần không dùng.
-// Hạn mức tính theo NGÀY và theo TUẦN: mỗi ngày dùng tối đa `daily` credits, cả tuần tối đa `weekly` credits (tuần bắt đầu thứ Hai).
-// Hết bên nào thì chờ bên đó làm mới. Mốc làm mới tính theo giờ Việt Nam (xem RESET_HOUR_VN).
-// Sổ cái: creditLedger/{jobId}_{kind} (id cố định => chạy lại không ghi trùng).
-// Số dư: creditBalances/{uid}_{YYYY-MM-DD} (ngày) và creditBalances/{uid}_w{YYYY-MM-DD thứ Hai} (tuần).
+// Chức năng: AI credits theo chu kỳ 24 giờ của từng tài khoản.
+// - Chu kỳ bắt đầu từ lần cấp đầu tiên của tài khoản và lặp lại đúng mỗi 24 giờ (KHÔNG reset cố định lúc 0 giờ).
+// - Job chỉ giữ chỗ (reserve) khi worker BẮT ĐẦU chạy. Job còn nằm trong hàng đợi không khóa credit.
+// - Thành công: chốt (settle) theo số câu thực tế lưu được. Thất bại: chốt với 0 => giải phóng toàn bộ phần giữ chỗ.
+// - Không cộng dồn: hết chu kỳ thì used về 0. Credit đang giữ chỗ (job đang chạy) được giữ nguyên qua mốc reset.
+// Sổ cái creditLedger/{key}_reserved, {key}_actual, {key}_refund. "key" là khóa của một lần giữ chỗ (xem attemptKey),
+// nên chạy lại cùng khóa không giữ chỗ lần hai và không chốt lần hai.
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb as realGetDb } from './firebase.js';
 
@@ -13,14 +15,9 @@ export function _useDbForTests(db) {
 }
 const getDb = () => dbOverride || realGetDb();
 
-// Giờ (theo giờ Việt Nam, UTC+7) mà hạn mức ngày/tuần được làm mới. 0 = nửa đêm, 22 = "dùng lại lúc 22:00".
-export const RESET_HOUR_VN = 0;
+export const CYCLE_MS = 24 * 3_600_000;
 
-const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
-const SHIFT_MS = (7 - RESET_HOUR_VN) * HOUR; // dịch giờ UTC sang "lịch" có ranh giới ngày đúng tại giờ reset
-
-// Không đủ credits. resetsAt: lúc được làm mới (ISO). window: 'day' hoặc 'week' (hạn mức nào đang chặn).
+// Không đủ credits. resetsAt: lúc chu kỳ hiện tại kết thúc (ISO). window luôn là 'day' (chu kỳ 24 giờ).
 export class QuotaError extends Error {
     constructor(message, { limit = 0, available = 0, resetsAt = null, window = 'day' } = {}) {
         super(message);
@@ -31,142 +28,117 @@ export class QuotaError extends Error {
     }
 }
 
-// Kỳ tính credits = ngày hiện tại, ví dụ "2026-10-07" (ranh giới ngày tại RESET_HOUR_VN giờ Việt Nam)
-export const currentPeriod = (date = new Date()) => new Date(date.getTime() + SHIFT_MS).toISOString().slice(0, 10);
+// Khóa giữ chỗ cho MỘT lần chạy của job. Mỗi lần thử (attempt) là một khóa riêng để thử lại không bị tính chung.
+export const attemptKey = (job) => `${job.id}_a${job.attempts || 1}`;
 
-const isDayKey = (p) => /^\d{4}-\d{2}-\d{2}$/.test(String(p));
-const dayStartMs = (day) => Date.parse(`${day}T00:00:00Z`) - SHIFT_MS;
+// limit: số (hạn mức mỗi 24 giờ) hoặc { daily } như cấu hình gói
+const limitOf = (limit) => (typeof limit === 'number' ? limit : limit?.daily ?? 0);
 
-// Ngày thứ Hai đầu tuần chứa `day`, ví dụ "2026-10-05"
-export const weekKey = (day) => {
-    const d = new Date(`${day}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-    return d.toISOString().slice(0, 10);
-};
-
-// Lúc hạn mức ngày / tuần được làm mới (ISO). Giao diện đếm ngược theo các mốc này.
-export const periodEnd = (period) => new Date(dayStartMs(period) + DAY).toISOString();
-export const weekEnd = (period) => new Date(dayStartMs(weekKey(period)) + 7 * DAY).toISOString();
-
-const balanceRef = (uid, key) => getDb().collection('creditBalances').doc(`${uid}_${key}`);
-const dayRef = (uid, period) => balanceRef(uid, period);
-const weekRef = (uid, period) => balanceRef(uid, `w${weekKey(period)}`);
+const balanceRef = (uid) => getDb().collection('creditBalances').doc(uid);
 const ledgerCol = () => getDb().collection('creditLedger');
 
-// limit: số (chỉ giới hạn theo ngày) hoặc { daily, weekly }
-const splitLimit = (limit) =>
-    typeof limit === 'number' ? { daily: limit, weekly: null } : { daily: limit.daily, weekly: limit.weekly ?? null };
+// Chu kỳ hiện tại của tài khoản. data: bản ghi số dư (có thể không có). Trả { cycleStart (ms), used, reserved }.
+export function rollCycle(data, now) {
+    const anchor = typeof data?.cycleStart === 'number' ? data.cycleStart : now;
+    const reserved = data?.reserved ?? 0;
+    if (now < anchor + CYCLE_MS) return { cycleStart: anchor, used: data?.used ?? 0, reserved };
+    // Quá một hoặc nhiều chu kỳ: dời mốc lên đúng bội số 24 giờ kể từ lần cấp đầu tiên
+    const cycleStart = anchor + Math.floor((now - anchor) / CYCLE_MS) * CYCLE_MS;
+    return { cycleStart, used: 0, reserved };
+}
 
-const windowState = (snap, limit) => {
-    const used = snap?.data()?.used ?? 0;
-    const reserved = snap?.data()?.reserved ?? 0;
-    return { limit, used, reserved, remaining: Math.max(0, limit - used - reserved) };
-};
-
-// Số dư hiện tại. remaining = số credits dùng được ngay (nhỏ hơn của ngày và tuần).
-// resetsAt/window: lúc nào và hạn mức nào làm remaining tăng lên (tuần nếu hạn mức tuần đang là giới hạn chặt hơn).
-export async function getBalance(uid, limit) {
-    const { daily, weekly } = splitLimit(limit);
-    const period = currentPeriod();
-    const [dSnap, wSnap] = await Promise.all([dayRef(uid, period).get(), weekly != null ? weekRef(uid, period).get() : null]);
-
-    const d = windowState(dSnap, daily);
-    const w = weekly != null ? windowState(wSnap, weekly) : null;
-    const weekBinds = w !== null && w.remaining <= d.remaining;
-
+function stateOf(snap, limit, now) {
+    const cur = rollCycle(snap?.data?.(), now);
+    const max = limitOf(limit);
     return {
-        period,
-        limit: daily,
-        used: d.used,
-        reserved: d.reserved,
-        remaining: w ? Math.min(d.remaining, w.remaining) : d.remaining,
-        window: weekBinds ? 'week' : 'day',
-        resetsAt: weekBinds ? weekEnd(period) : periodEnd(period),
-        week: w ? { ...w, resetsAt: weekEnd(period) } : null
+        ...cur,
+        limit: max,
+        remaining: Math.max(0, max - cur.used - cur.reserved),
+        resetsAt: new Date(cur.cycleStart + CYCLE_MS).toISOString()
     };
 }
 
-// Kiểm tra quota rồi giữ chỗ `amount` credits. `writes(tx)` (tùy chọn) chạy trong CÙNG transaction
-// để việc tạo job và việc giữ chỗ là một: hoặc cùng có, hoặc cùng không.
-export async function reserveCredits({ uid, jobId, amount, limit, writes }) {
-    const { daily, weekly } = splitLimit(limit);
-    const period = currentPeriod();
-    const dRef = dayRef(uid, period);
-    const wRef = weekly != null ? weekRef(uid, period) : null;
-
-    await getDb().runTransaction(async (tx) => {
-        const [dSnap, wSnap] = await Promise.all([tx.get(dRef), wRef ? tx.get(wRef) : null]);
-        const d = windowState(dSnap, daily);
-        const w = wRef ? windowState(wSnap, weekly) : null;
-
-        const available = w ? Math.min(d.remaining, w.remaining) : d.remaining;
-        if (amount > available) {
-            const weekBinds = w !== null && w.remaining <= d.remaining;
-            throw new QuotaError(
-                `Không đủ AI credits ${weekBinds ? 'tuần này' : 'hôm nay'} (còn ${available}, cần ${amount})`,
-                { limit: daily, available, window: weekBinds ? 'week' : 'day', resetsAt: weekBinds ? weekEnd(period) : periodEnd(period) }
-            );
-        }
-
-        tx.set(
-            dRef,
-            { uid, period, used: d.used, reserved: d.reserved + amount, updatedAt: FieldValue.serverTimestamp() },
-            { merge: true }
-        );
-        if (wRef) {
-            tx.set(
-                wRef,
-                { uid, period: `w${weekKey(period)}`, used: w.used, reserved: w.reserved + amount, updatedAt: FieldValue.serverTimestamp() },
-                { merge: true }
-            );
-        }
-        tx.set(ledgerCol().doc(`${jobId}_reserved`), {
-            uid,
-            kind: 'reserved',
-            amount,
-            estimated: amount,
-            jobId,
-            period,
-            at: FieldValue.serverTimestamp()
-        });
-        if (writes) writes(tx);
+const quotaError = (s, amount) =>
+    new QuotaError(`Không đủ AI credits trong chu kỳ 24 giờ (còn ${s.remaining}, cần ${amount})`, {
+        limit: s.limit,
+        available: s.remaining,
+        resetsAt: s.resetsAt,
+        window: 'day'
     });
 
-    return { period, reserved: amount };
+// Số dư hiện tại (không ghi gì). remaining = số credits dùng được ngay.
+export async function getBalance(uid, limit, now = Date.now()) {
+    const s = stateOf(await balanceRef(uid).get(), limit, now);
+    return {
+        period: new Date(s.cycleStart).toISOString(),
+        limit: s.limit,
+        used: s.used,
+        reserved: s.reserved,
+        remaining: s.remaining,
+        window: 'day',
+        resetsAt: s.resetsAt,
+        week: null
+    };
 }
 
-// Chốt job: tính `actual` credits đã dùng, hoàn phần còn lại. actual = 0 nghĩa là hoàn toàn bộ (job lỗi).
-// `period` là kỳ ngày lúc giữ chỗ; hạn mức tuần suy ra từ đó. Idempotent: gọi lại lần hai không làm gì (trả false).
-export async function settleCredits({ uid, jobId, period, reserved, actual }) {
-    const dRef = dayRef(uid, period);
-    const wRef = isDayKey(period) ? weekRef(uid, period) : null; // kỳ kiểu cũ (theo tháng) thì không có hạn mức tuần
+// Kiểm tra nhanh lúc NHẬN yêu cầu (chưa giữ chỗ). Không đủ thì ném QuotaError. Việc giữ chỗ thật diễn ra khi job chạy.
+export async function assertCredits({ uid, amount, limit, now = Date.now() }) {
+    const s = stateOf(await balanceRef(uid).get(), limit, now);
+    if (amount > s.remaining) throw quotaError(s, amount);
+    return { remaining: s.remaining, resetsAt: s.resetsAt };
+}
+
+// Giữ chỗ `amount` credits cho khóa jobId. Chạy lại cùng khóa thì không giữ thêm.
+export async function reserveCredits({ uid, jobId, amount, limit, now = Date.now() }) {
+    const ref = balanceRef(uid);
+    const lRef = ledgerCol().doc(`${jobId}_reserved`);
+
+    await getDb().runTransaction(async (tx) => {
+        const [snap, done] = await Promise.all([tx.get(ref), tx.get(lRef)]);
+        if (done.exists) return; // đã giữ chỗ cho khóa này rồi
+        const s = stateOf(snap, limit, now);
+        if (amount > s.remaining) throw quotaError(s, amount);
+
+        tx.set(
+            ref,
+            { uid, cycleStart: s.cycleStart, used: s.used, reserved: s.reserved + amount, updatedAt: FieldValue.serverTimestamp() },
+            { merge: true }
+        );
+        tx.set(lRef, { uid, kind: 'reserved', amount, jobId, at: FieldValue.serverTimestamp() });
+    });
+    return { reserved: amount };
+}
+
+// Chốt khóa jobId: trừ `actual` credits đã dùng (bị chặn trong [0, số đã giữ]), hoàn phần còn lại.
+// actual = 0 nghĩa là hoàn toàn bộ (job lỗi). Không giữ chỗ trước => không làm gì. Chốt hai lần => không làm gì (trả false).
+export async function settleCredits({ uid, jobId, actual, now = Date.now() }) {
+    const ref = balanceRef(uid);
+    const lRef = ledgerCol().doc(`${jobId}_reserved`);
     const marker = ledgerCol().doc(`${jobId}_actual`);
 
     return getDb().runTransaction(async (tx) => {
-        const [done, dBal, wBal] = await Promise.all([tx.get(marker), tx.get(dRef), wRef ? tx.get(wRef) : null]);
-        if (done.exists) return false;
+        const [snap, res, done] = await Promise.all([tx.get(ref), tx.get(lRef), tx.get(marker)]);
+        if (!res.exists || done.exists) return false;
 
-        const used = Math.min(Math.max(Math.trunc(actual), 0), reserved);
+        const reserved = Number(res.data().amount) || 0;
+        const used = Math.min(Math.max(Math.trunc(Number(actual) || 0), 0), reserved);
         const refund = reserved - used;
-        const apply = (cur = {}) => ({
-            used: (cur.used ?? 0) + used,
-            reserved: Math.max(0, (cur.reserved ?? 0) - reserved),
-            updatedAt: FieldValue.serverTimestamp()
-        });
+        const cur = rollCycle(snap?.data?.(), now);
 
-        tx.set(dRef, { uid, period, ...apply(dBal.data()) }, { merge: true });
-        if (wBal?.exists) tx.set(wRef, { uid, ...apply(wBal.data()) }, { merge: true });
-
-        tx.set(marker, { uid, kind: 'actual', amount: used, jobId, period, at: FieldValue.serverTimestamp() });
-        if (refund > 0) {
-            tx.set(ledgerCol().doc(`${jobId}_refund`), {
+        tx.set(
+            ref,
+            {
                 uid,
-                kind: 'refund',
-                amount: refund,
-                jobId,
-                period,
-                at: FieldValue.serverTimestamp()
-            });
+                cycleStart: cur.cycleStart,
+                used: cur.used + used,
+                reserved: Math.max(0, cur.reserved - reserved),
+                updatedAt: FieldValue.serverTimestamp()
+            },
+            { merge: true }
+        );
+        tx.set(marker, { uid, kind: 'actual', amount: used, jobId, at: FieldValue.serverTimestamp() });
+        if (refund > 0) {
+            tx.set(ledgerCol().doc(`${jobId}_refund`), { uid, kind: 'refund', amount: refund, jobId, at: FieldValue.serverTimestamp() });
         }
         return true;
     });

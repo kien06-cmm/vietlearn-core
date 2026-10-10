@@ -7,12 +7,13 @@ import { getDb } from '../firebase.js';
 import { requireRole, requireOwner } from '../middleware/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { creditLimits, getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, getBalance, reserveCredits } from '../credits.js';
+import { QuotaError, assertCredits, getBalance } from '../credits.js';
 import { QUESTION_TYPES, parseQuestion, splitForStorage, stemKey } from '../ai/questionRules.js';
 import { MAX_IMPORT_BYTES, ImportFileError, readImportFile } from '../ai/importFile.js';
 import { finalizeImport } from '../ai/importRules.js';
 import { SAMPLE_FORMATS, buildSample } from '../ai/importSamples.js';
 import { wakeWorker } from '../worker/index.js';
+import { aiCooldown } from '../ai/cooldown.js';
 
 const router = Router();
 const userOnly = requireRole(['user']);
@@ -65,7 +66,13 @@ function rebuildRaw(q, key, patch = {}) {
 router.get('/credits', userOnly, async (req, res) => {
     const plan = getPlan(req.profile.plan);
     const balance = await getBalance(req.actor.id, creditLimits(plan));
-    res.status(200).json({ status: 'success', credits: balance });
+    // aiPause: Gemini đang tạm nghỉ do vượt hạn mức => giao diện báo người dùng và tạm khóa nút gọi AI
+    const pauseMs = aiCooldown.remainingMs();
+    res.status(200).json({
+        status: 'success',
+        credits: balance,
+        aiPause: pauseMs > 0 ? { until: new Date(Date.now() + pauseMs).toISOString() } : null
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -118,36 +125,9 @@ router.post('/generate', generateLimiter, userOnly, async (req, res) => {
         return fail(res, 429, 'Đang có job tạo câu hỏi chạy, vui lòng chờ xong', 'too-many-jobs');
     }
 
-    const jobRef = db.collection('jobs').doc();
-    const period = currentPeriod();
+    // Chỉ kiểm tra đủ credits lúc nhận yêu cầu. Credits được giữ chỗ khi job bắt đầu chạy (job đang đợi không khóa credit).
     try {
-        await reserveCredits({
-            uid,
-            jobId: jobRef.id,
-            amount: count, // 1 credit = 1 câu hỏi; dùng ít hơn thì hoàn phần dư khi job xong
-            limit: creditLimits(plan),
-            writes: (tx) =>
-                tx.set(jobRef, {
-                    type: 'generate_questions',
-                    ownerId: uid,
-                    documentId,
-                    topicId,
-                    count,
-                    types,
-                    pageFrom: pageFrom ?? null,
-                    pageTo: pageTo ?? null,
-                    credits: { period, reserved: count },
-                    status: 'queued',
-                    attempts: 0,
-                    maxAttempts: 3,
-                    progress: { done: 0, total: null },
-                    error: null,
-                    deadLetter: false,
-                    runAfter: FieldValue.serverTimestamp(),
-                    createdAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp()
-                })
-        });
+        await assertCredits({ uid, amount: count, limit: creditLimits(plan) });
     } catch (err) {
         if (err instanceof QuotaError) {
             return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
@@ -155,8 +135,29 @@ router.post('/generate', generateLimiter, userOnly, async (req, res) => {
         throw err;
     }
 
+    const jobRef = db.collection('jobs').doc();
+    await jobRef.set({
+        type: 'generate_questions',
+        ownerId: uid,
+        documentId,
+        topicId,
+        count,
+        types,
+        pageFrom: pageFrom ?? null,
+        pageTo: pageTo ?? null,
+        status: 'queued',
+        attempts: 0,
+        maxAttempts: 3,
+        progress: { done: 0, total: null },
+        error: null,
+        deadLetter: false,
+        runAfter: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+    });
+
     wakeWorker();
-    res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { period, reserved: count } });
+    res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { requested: count, reserved: 0 } });
 });
 
 // Tiến độ một job
@@ -178,6 +179,11 @@ router.get(
                 status: j.status,
                 progress: j.progress || null,
                 error: j.error || null,
+                // Mã lỗi gần nhất (vd ai-rate-limit) và thời điểm hệ thống tự thử lại, để giao diện giải thích việc đang chờ
+                errorCode: j.lastError?.code ?? null,
+                retryAt: j.status === 'queued' && j.lastError ? iso(j.runAfter) : null,
+                attempts: j.attempts || 0,
+                maxAttempts: j.maxAttempts || 3,
                 result: j.result || null
             }
         });

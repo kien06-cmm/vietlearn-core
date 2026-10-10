@@ -130,3 +130,18 @@
 .topic-bar-fill.mastery-fill-strong {
   background: var(--ok);
 }
+
+/* Thẻ chủ đề đã ôn xong: tổng quan + nút Hoàn thành / Ôn lại */
+.finished-card {
+  gap: 0.625rem;
+}
+
+.finished-title {
+  margin: 0;
+  font-size: 1.0625rem;
+}
+
+.finished-stem {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
