@@ -25,7 +25,7 @@ import { recordTopicOutcomes, statsCol } from '../mastery.js';
 import { buildKnowledgeMap, outcomesByTopic, toMasteryItem } from '../quiz/masteryRules.js';
 import { pickPractice, toPracticeQuestion } from '../quiz/practiceRules.js';
 import { creditLimits, getPlan } from '../config/plans.js';
-import { QuotaError, currentPeriod, reserveCredits } from '../credits.js';
+import { QuotaError, assertCredits } from '../credits.js';
 import { MAX_PRACTICE_COUNT } from '../ai/weaknessRules.js';
 import { wakeWorker } from '../worker/index.js';
 
@@ -395,42 +395,36 @@ router.post(
             return fail(res, 429, 'Đang có job tạo câu luyện chạy, vui lòng chờ xong', 'too-many-jobs');
         }
 
-        const jobRef = db.collection('jobs').doc();
-        const period = currentPeriod();
+        // Chỉ kiểm tra đủ credits lúc nhận yêu cầu; credits được giữ chỗ khi job bắt đầu chạy
         try {
-            await reserveCredits({
-                uid,
-                jobId: jobRef.id,
-                amount: count,
-                limit: creditLimits(plan),
-                writes: (tx) =>
-                    tx.set(jobRef, {
-                        type: 'generate_practice',
-                        ownerId: uid,
-                        topicId,
-                        count,
-                        types: ['single'], // V1: chỉ trắc nghiệm 4 lựa chọn (dễ kiểm tra, chấm tự động)
-                        credits: { period, reserved: count },
-                        status: 'queued',
-                        attempts: 0,
-                        maxAttempts: 3,
-                        progress: { done: 0, total: 1 },
-                        error: null,
-                        deadLetter: false,
-                        runAfter: FieldValue.serverTimestamp(),
-                        createdAt: FieldValue.serverTimestamp(),
-                        updatedAt: FieldValue.serverTimestamp()
-                    })
-            });
+            await assertCredits({ uid, amount: count, limit: creditLimits(plan) });
         } catch (err) {
             if (err instanceof QuotaError) {
-                return fail(res, 402, err.message, 'quota-credits', { resetsAt: err.resetsAt, window: err.window });
+                return fail(res, 402, err.message, 'quota-credits');
             }
             throw err;
         }
 
+        const jobRef = db.collection('jobs').doc();
+        await jobRef.set({
+            type: 'generate_practice',
+            ownerId: uid,
+            topicId,
+            count,
+            types: ['single'], // V1: chỉ trắc nghiệm 4 lựa chọn (dễ kiểm tra, chấm tự động)
+            status: 'queued',
+            attempts: 0,
+            maxAttempts: 3,
+            progress: { done: 0, total: 1 },
+            error: null,
+            deadLetter: false,
+            runAfter: FieldValue.serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+
         wakeWorker();
-        res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { period, reserved: count } });
+        res.status(202).json({ status: 'success', jobId: jobRef.id, credits: { requested: count, reserved: 0 } });
     }
 );
 
