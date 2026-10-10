@@ -417,6 +417,19 @@ export function restartFinishedTopic(token, topicId, scope = 'hard') {
   return request('/review/finished/restart', { token, method: 'POST', body: { topicId, scope } })
 }
 
+// ---------- Admin tối thiểu (Phase 6) ----------
+// Chỉ tài khoản isAdmin gọi được (người khác nhận 403).
+
+// Tìm người dùng theo email (khớp chính xác) -> { users: [{ uid, email, displayName, plan, isAdmin, deleted, createdAt }] }
+export function adminFindUsers(token, email) {
+  return request(`/admin/users?email=${encodeURIComponent(email)}`, { token })
+}
+
+// Đổi gói thủ công: plan 'free' | 'pro' -> { user }
+export function adminSetPlan(token, uid, plan) {
+  return request(`/admin/users/${encodeURIComponent(uid)}/plan`, { token, method: 'PATCH', body: { plan } })
+}
+
 // ---------- Heatmap + chuyển kết quả khách (Phase 5) ----------
 
 // Heatmap cho chủ phòng: { heatmap: { ready, submitted, needed, questions: [{ id, no, stem, topicId, answered, wrong, skipped, wrongRate, level: 'hot' | 'warm' | 'mild' | 'cool' | 'none', enough }],

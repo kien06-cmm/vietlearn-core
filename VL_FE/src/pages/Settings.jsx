@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { deleteMe } from '../services/api.js'
 import { applyPrefs } from '../theme.js'
+import AdminPanel from '../components/AdminPanel.jsx'
 
 const FONT_SIZES = [
   { id: 'sm', label: 'Nhỏ' },
@@ -141,6 +142,8 @@ export default function Settings({ profile, save, getToken, reauthenticate, logo
           </p>
         )}
       </section>
+
+      {profile.isAdmin && <AdminPanel getToken={getToken} />}
 
       <section className="card">
         <h2>Tài khoản</h2>

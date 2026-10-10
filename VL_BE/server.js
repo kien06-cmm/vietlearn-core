@@ -18,6 +18,7 @@ import quizzesRouter from './routes/quizzes.js';
 import attemptsRouter from './routes/attempts.js';
 import roomsRouter from './routes/rooms.js';
 import reviewRouter from './routes/review.js';
+import adminRouter from './routes/admin.js';
 import { startWorker } from './worker/index.js';
 import { attachRealtime } from './realtime/wsServer.js';
 
@@ -295,6 +296,8 @@ app.use('/attempts', attemptsRouter);
 app.use('/rooms', roomsRouter);
 // Ôn tập: sổ lỗi sai + lịch ôn 1-3-7 ngày (Phase 5)
 app.use('/review', reviewRouter);
+// Admin tối thiểu: tìm người dùng, đổi gói (Phase 6). Chỉ tài khoản isAdmin.
+app.use('/admin', adminRouter);
 
 // ---------------------------------------------------------------------------
 // Xử lý lỗi
